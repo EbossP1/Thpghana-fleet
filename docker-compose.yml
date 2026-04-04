@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────
+# THP Ghana Fleet Management — Docker Compose (Supabase Edition)
+# Database is hosted on Supabase — only app + nginx here
+# ─────────────────────────────────────────────────────────────────
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fleet-app
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: fleet-nginx
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/fleet.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
