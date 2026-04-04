@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: thpghana-fleet
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: gunicorn backend.main:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT -w 2 --timeout 120
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+    healthCheckPath: /
+    autoDeploy: true
