@@ -423,6 +423,7 @@ tbody tr:last-child td { border-bottom: none; }
 .page-loading { display: flex; align-items: center; justify-content: center; min-height: 300px; }
 
 /* ─── TOAST ─── */
+.print-header,.print-footer { display:none; }
 #toast-container { position: fixed; top: 70px; right: 24px; z-index: 600; display: flex; flex-direction: column; gap: 8px; }
 .toast {
   background: var(--surface-2); border: 1px solid var(--border);
@@ -454,13 +455,22 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* Print styles */
 @media print {
-  .topbar, .sidebar, .btn, .toolbar, .modal-overlay { display: none !important; }
-  .main-content { margin: 0 !important; padding: 20px !important; }
-  body { background: #fff; color: #000; }
-  .card { border: 1px solid #ddd; box-shadow: none; }
-  .stat-card .stat-value,.cell-primary,.cell-mono,td,th { color:#000 !important; }
-  .theme-toggle,#theme-toggle { display:none !important; }
-  table { font-size: 11px; }
+  .topbar,.sidebar,.toolbar,.modal-overlay,.hamburger,.cell-actions,.header-actions,.tabs,#theme-toggle,#btn-logout,.theme-toggle,.nav-badge,.btn { display:none !important; }
+  .main-content { margin:0 !important; padding:10px 20px !important; }
+  body { background:#fff !important; color:#000 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .card { border:1px solid #ccc; box-shadow:none; break-inside:avoid; }
+  .stat-card { border:1px solid #ccc; break-inside:avoid; }
+  .stat-card .stat-value,.stat-card .stat-label,.cell-primary,.cell-mono,td,th,h2,h3,h4,.cost-vehicle,.cost-amount,.reminder-title,.detail-value,.page-header h2,.page-header .subtitle { color:#000 !important; }
+  .badge { border:1px solid #999; }
+  table { font-size:10px; }
+  thead th { background:#eee !important; color:#000 !important; border:1px solid #999; }
+  tbody td { border-bottom:1px solid #ddd; }
+  .print-header { display:block !important; text-align:center; padding:16px 0; margin-bottom:16px; border-bottom:3px solid #1B5E2E; }
+  .print-header img { height:48px; margin-bottom:6px; }
+  .print-header h2 { font-size:15pt; font-weight:700; color:#1B5E2E !important; margin:4px 0; }
+  .print-header .print-subtitle { font-size:10pt; color:#333 !important; }
+  .print-header .print-date { font-size:8pt; color:#666 !important; margin-top:4px; }
+  .print-footer { display:block !important; text-align:center; padding:8px 0; margin-top:20px; font-size:7pt; color:#999 !important; border-top:1px solid #ccc; }
 }
 </style>
 </head>
@@ -617,9 +627,14 @@ function exportCSV(filename){
   toast('CSV exported');
 }
 function printPage(){
-  const pl=document.getElementById('print-logo');if(pl)pl.src=LOGO_SRC;
-  const pd=document.getElementById('print-date');if(pd)pd.textContent='Printed: '+new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'})+' at '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-  setTimeout(()=>window.print(),100);
+  var pl=document.getElementById('print-logo');
+  if(pl)pl.src=LOGO_SRC;
+  var pd=document.getElementById('print-date');
+  if(pd)pd.textContent='Printed: '+new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'})+' at '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  var ph=document.querySelector('.page-header h2');
+  var ps=document.querySelector('.print-header .print-subtitle');
+  if(ps&&ph)ps.textContent=ph.textContent;
+  setTimeout(function(){window.print();},200);
 }
 
 // ─── AUTO-CALC FUEL ──────────────────────────────────────────────────────────
@@ -1767,39 +1782,52 @@ async function loadReport(type, btn) {
         <td>${p.trips}</td>
       </tr>`).join('')}</tbody></table></div>`;
   } else if (type === 'fuel-cards') {
-    const fc = data;
-    if(!fc||!fc.cards){el.innerHTML='<div class="empty-state"><p>No fuel card data available</p></div>';return;}
-    const tBal=fc.summary.total_balance||0,tTop=fc.summary.total_topups||0,tExp=fc.summary.total_expenses||0;
-    el.innerHTML = `<div style="padding:24px">
-      <div style="text-align:center;margin-bottom:20px;padding-bottom:12px;border-bottom:3px solid var(--text)">
-        <h3 style="font-size:1.4rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Fuel Cards</h3>
-      </div>
-      <table style="width:100%;border:2px solid var(--text)"><thead><tr>
-        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem">Number</th>
-        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem">Type of Fuel Card</th>
-        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem">Vehicle</th>
-        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem;text-align:right">Amount</th>
-        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem">Note</th>
-      </tr></thead><tbody>${fc.cards.map(c=>`<tr>
-        <td style="border:1px solid var(--border);padding:8px 12px" class="cell-mono">${esc(c.card_number)}</td>
-        <td style="border:1px solid var(--border);padding:8px 12px">${esc(c.card_type||'GO CARD')}</td>
-        <td style="border:1px solid var(--border);padding:8px 12px">${c.registration?esc(c.registration)+' — '+esc(c.unit_number||'')+(c.make?' / '+esc(c.make):'')+(c.model?' '+esc(c.model):''):c.unit_number?esc(c.unit_number):'Unassigned'}</td>
-        <td style="border:1px solid var(--border);padding:8px 12px;text-align:right;font-family:var(--mono)">${fmt(c.current_balance)}</td>
-        <td style="border:1px solid var(--border);padding:8px 12px;font-size:0.82rem">${Number(c.current_balance)<=0?'<span style="color:var(--danger);font-weight:600">EMPTY</span>':Number(c.current_balance)<=500?'<span style="color:var(--warning)">Low Bal</span>':'Active'}</td>
-      </tr>`).join('')}
-      <tr><td colspan="3" style="border:1px solid var(--border);padding:8px 12px;text-align:center;font-weight:700;border-top:3px solid var(--text);background:var(--surface-2)">TOTAL</td>
-        <td style="border:1px solid var(--border);padding:8px 12px;text-align:right;font-family:var(--mono);font-weight:700;border-top:3px solid var(--text);background:var(--surface-2)">${fmt(tBal)}</td>
-        <td style="border:1px solid var(--border);padding:8px 12px;border-top:3px solid var(--text);background:var(--surface-2)"></td></tr>
-      </tbody></table>
-      <table style="margin-top:24px;margin-left:auto;width:340px;border:2px solid var(--text)"><tbody>
-        <tr><td style="border:1px solid var(--border);padding:6px 12px"><strong>SUMMARY</strong></td><td style="border:1px solid var(--border);padding:6px 12px"></td></tr>
-        <tr><td style="border:1px solid var(--border);padding:6px 12px;font-weight:600">Cash bal. B/F</td><td style="border:1px solid var(--border);padding:6px 12px;text-align:right;font-family:var(--mono)">${fmt(tBal-tTop+tExp)}</td></tr>
-        <tr><td style="border:1px solid var(--border);padding:6px 12px;font-weight:600">Cash Deposit</td><td style="border:1px solid var(--border);padding:6px 12px;text-align:right;font-family:var(--mono)">${fmt(tTop)}</td></tr>
-        <tr style="background:var(--surface-2)"><td style="border:1px solid var(--border);padding:6px 12px;font-weight:700">Total Cash</td><td style="border:1px solid var(--border);padding:6px 12px;text-align:right;font-family:var(--mono);font-weight:700">${fmt(tBal+tExp)}</td></tr>
-        <tr><td style="border:1px solid var(--border);padding:6px 12px;font-weight:600">Fuel Expenses</td><td style="border:1px solid var(--border);padding:6px 12px;text-align:right;font-family:var(--mono);color:var(--danger)">-${fmt(tExp)}</td></tr>
-        <tr><td style="border:2px solid var(--text);padding:6px 12px;font-weight:700">Cash bal. C/F</td><td style="border:2px solid var(--text);padding:6px 12px;text-align:right;font-family:var(--mono);font-weight:700;text-decoration:underline">${fmt(tBal)}</td></tr>
-      </tbody></table>
-    </div>`;
+    var fc = data;
+    if (!fc || !fc.cards) { el.innerHTML = '<div class="empty-state"><p>No fuel card data</p></div>'; return; }
+    var tBal = Number(fc.summary.total_balance) || 0;
+    var tTop = Number(fc.summary.total_topups) || 0;
+    var tExp = Number(fc.summary.total_expenses) || 0;
+    var bfBal = tBal - tTop + tExp;
+    var cardRows = '';
+    for (var i = 0; i < fc.cards.length; i++) {
+      var c = fc.cards[i];
+      var bal = Number(c.current_balance || 0);
+      var veh = c.registration ? esc(c.registration) + ' / ' + esc(c.unit_number || '') : c.unit_number ? esc(c.unit_number) : 'Unassigned';
+      var status = bal <= 0 ? '<span style="color:red;font-weight:600">EMPTY</span>' : bal <= 500 ? '<span style="color:orange">Low</span>' : 'Active';
+      var bs = 'border:1px solid #999;padding:8px 12px';
+      cardRows += '<tr>';
+      cardRows += '<td style="' + bs + ';font-family:var(--mono)">' + esc(c.card_number) + '</td>';
+      cardRows += '<td style="' + bs + '">' + esc(c.card_type || 'GO CARD') + '</td>';
+      cardRows += '<td style="' + bs + '">' + veh + '</td>';
+      cardRows += '<td style="' + bs + ';text-align:right;font-family:var(--mono)">' + fmt(bal) + '</td>';
+      cardRows += '<td style="' + bs + '">' + status + '</td>';
+      cardRows += '</tr>';
+    }
+    var bs2 = 'border:1px solid #999;padding:8px 12px';
+    var bs3 = 'border:2px solid var(--text);padding:8px 12px';
+    var h = '<div style="padding:24px">';
+    h += '<div style="text-align:center;margin-bottom:20px;padding-bottom:12px;border-bottom:3px solid var(--text)">';
+    h += '<h3 style="font-size:1.4rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">FUEL CARD REPORT</h3>';
+    h += '<p style="color:var(--text-3);font-size:0.85rem">The Hunger Project \u2014 Ghana</p></div>';
+    h += '<table style="width:100%;border:2px solid var(--text);border-collapse:collapse"><thead><tr>';
+    h += '<th style="' + bs2 + ';background:var(--surface-3);color:var(--text);text-transform:none">Card Number</th>';
+    h += '<th style="' + bs2 + ';background:var(--surface-3);color:var(--text);text-transform:none">Type</th>';
+    h += '<th style="' + bs2 + ';background:var(--surface-3);color:var(--text);text-transform:none">Vehicle</th>';
+    h += '<th style="' + bs2 + ';background:var(--surface-3);color:var(--text);text-transform:none;text-align:right">Balance (GH\u20B5)</th>';
+    h += '<th style="' + bs2 + ';background:var(--surface-3);color:var(--text);text-transform:none">Status</th>';
+    h += '</tr></thead><tbody>' + cardRows;
+    h += '<tr style="background:var(--surface-2)"><td colspan="3" style="' + bs3 + ';text-align:center;font-weight:700">TOTAL BALANCE</td>';
+    h += '<td style="' + bs3 + ';text-align:right;font-family:var(--mono);font-weight:700">' + fmt(tBal) + '</td>';
+    h += '<td style="' + bs3 + '"></td></tr></tbody></table>';
+    h += '<table style="margin-top:24px;margin-left:auto;width:360px;border:2px solid var(--text);border-collapse:collapse"><tbody>';
+    h += '<tr style="background:var(--surface-3)"><td colspan="2" style="' + bs2 + ';font-weight:700;text-align:center">ACCOUNT SUMMARY</td></tr>';
+    h += '<tr><td style="' + bs2 + ';font-weight:600">Opening Balance</td><td style="' + bs2 + ';text-align:right;font-family:var(--mono)">' + fmt(bfBal) + '</td></tr>';
+    h += '<tr><td style="' + bs2 + ';font-weight:600">Total Top-ups</td><td style="' + bs2 + ';text-align:right;font-family:var(--mono);color:var(--accent)">+' + fmt(tTop) + '</td></tr>';
+    h += '<tr style="background:var(--surface-2)"><td style="' + bs2 + ';font-weight:700">Total Available</td><td style="' + bs2 + ';text-align:right;font-family:var(--mono);font-weight:700">' + fmt(tBal + tExp) + '</td></tr>';
+    h += '<tr><td style="' + bs2 + ';font-weight:600">Fuel Purchases</td><td style="' + bs2 + ';text-align:right;font-family:var(--mono);color:var(--danger)">-' + fmt(tExp) + '</td></tr>';
+    h += '<tr style="background:var(--surface-2)"><td style="' + bs3 + ';font-weight:700">Closing Balance</td><td style="' + bs3 + ';text-align:right;font-family:var(--mono);font-weight:700;text-decoration:underline">' + fmt(tBal) + '</td></tr>';
+    h += '</tbody></table></div>';
+    el.innerHTML = h;
   }
 }
 
