@@ -127,6 +127,7 @@ class UserCreate(BaseModel):
     last_name:Optional[str]=None; role:Optional[str]="viewer"
 
 class ReminderUpdate(BaseModel): status:str
+class PasswordChange(BaseModel): password:str
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 @app.get("/")
@@ -573,6 +574,14 @@ def create_user(data:UserCreate,user=Depends(require_admin)):
 @app.put("/api/users/{uid}/toggle")
 def toggle_user(uid:int,user=Depends(require_admin)):
     execute("UPDATE users SET is_active=NOT is_active WHERE id=%s",(uid,)); return {"message":"Toggled"}
+
+@app.put("/api/users/{uid}/password")
+def change_password(uid:int,data:PasswordChange,user=Depends(require_admin)):
+    if not data.password or len(data.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+    pw=bcrypt.hashpw(data.password.encode(),bcrypt.gensalt()).decode()
+    execute("UPDATE users SET password_hash=%s WHERE id=%s",(pw,uid))
+    return {"message":"Password updated"}
 
 # ── Lookups ───────────────────────────────────────────────────────────────────
 @app.get("/api/lookups")
