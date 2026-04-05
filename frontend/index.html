@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,32 +8,32 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0B0F14;
-  --surface: #141A22;
-  --surface-2: #1C242F;
-  --surface-3: #243040;
-  --border: #2A3544;
-  --border-light: #344458;
-  --text: #E8ECF1;
-  --text-2: #9DAAB8;
-  --text-3: #6B7A8D;
-  --accent: #3ECF8E;
-  --accent-dim: rgba(62,207,142,0.12);
-  --accent-2: #38BDF8;
-  --accent-2-dim: rgba(56,189,248,0.12);
-  --warning: #F5A623;
-  --warning-dim: rgba(245,166,35,0.12);
-  --danger: #EF4444;
-  --danger-dim: rgba(239,68,68,0.12);
-  --gold: #C9A84C;
   --font: 'DM Sans', -apple-system, sans-serif;
   --mono: 'JetBrains Mono', monospace;
-  --radius: 10px;
-  --radius-sm: 6px;
-  --radius-lg: 16px;
-  --shadow: 0 2px 8px rgba(0,0,0,0.3);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,0.4);
+  --radius: 10px; --radius-sm: 6px; --radius-lg: 16px;
   --transition: 0.2s cubic-bezier(0.4,0,0.2,1);
+}
+[data-theme="dark"] {
+  --bg: #0B0F14; --surface: #141A22; --surface-2: #1C242F; --surface-3: #243040;
+  --border: #2A3544; --border-light: #344458;
+  --text: #E8ECF1; --text-2: #9DAAB8; --text-3: #6B7A8D;
+  --accent: #3ECF8E; --accent-dim: rgba(62,207,142,0.12);
+  --accent-2: #38BDF8; --accent-2-dim: rgba(56,189,248,0.12);
+  --warning: #F5A623; --warning-dim: rgba(245,166,35,0.12);
+  --danger: #EF4444; --danger-dim: rgba(239,68,68,0.12);
+  --shadow: 0 2px 8px rgba(0,0,0,0.3); --shadow-lg: 0 8px 32px rgba(0,0,0,0.4);
+  --topbar-bg: rgba(11,15,20,0.85);
+}
+[data-theme="light"] {
+  --bg: #F4F6F8; --surface: #FFFFFF; --surface-2: #F0F2F5; --surface-3: #E4E8EC;
+  --border: #D8DCE2; --border-light: #C8CDD4;
+  --text: #1A1D21; --text-2: #4A5568; --text-3: #8896A6;
+  --accent: #16A34A; --accent-dim: rgba(22,163,74,0.10);
+  --accent-2: #0284C7; --accent-2-dim: rgba(2,132,199,0.10);
+  --warning: #D97706; --warning-dim: rgba(217,119,6,0.10);
+  --danger: #DC2626; --danger-dim: rgba(220,38,38,0.10);
+  --shadow: 0 1px 4px rgba(0,0,0,0.08); --shadow-lg: 0 4px 16px rgba(0,0,0,0.12);
+  --topbar-bg: rgba(255,255,255,0.88);
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 14px; }
@@ -44,6 +44,7 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+  transition: background 0.3s, color 0.3s;
 }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -110,13 +111,16 @@ input, select, textarea { font-family: var(--font); }
 .btn-danger:hover { background: rgba(239,68,68,0.2); }
 .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
 .btn-block { width: 100%; justify-content: center; }
+.btn-print { background:var(--accent-2-dim);color:var(--accent-2); }
+.btn-export { background:var(--warning-dim);color:var(--warning); }
+.form-group .auto-calc { background:var(--accent-dim) !important;border-color:var(--accent) !important;font-weight:600; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
 
 /* ─── LAYOUT ─── */
 #app-shell { display: none; }
 .topbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-  height: 56px; background: rgba(11,15,20,0.85);
+  height: 56px; background: var(--topbar-bg);
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; padding: 0 24px;
@@ -154,8 +158,10 @@ input, select, textarea { font-family: var(--font); }
 .sidebar .nav-item .nav-badge {
   margin-left: auto; background: var(--danger); color: #fff;
   font-size: 0.7rem; font-weight: 600; padding: 1px 7px;
-  border-radius: 10px; min-width: 20px; text-align: center;
+  border-radius: 10px; min-width: 22px; text-align: center;
+  animation: pulse-badge 2s infinite;
 }
+@keyframes pulse-badge { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.7;transform:scale(1.1)} }
 
 .main-content {
   margin-left: 240px; margin-top: 56px;
@@ -328,7 +334,7 @@ tbody tr:last-child td { border-bottom: none; }
 .reminder-row:hover { background: rgba(255,255,255,0.02); }
 .reminder-row:last-child { border-bottom: none; }
 .reminder-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.reminder-dot.critical { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+.reminder-dot.critical { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: pulse-badge 1.5s infinite; }
 .reminder-dot.high { background: var(--warning); }
 .reminder-dot.medium { background: var(--accent-2); }
 .reminder-dot.low { background: var(--text-3); }
@@ -420,6 +426,8 @@ tbody tr:last-child td { border-bottom: none; }
   .main-content { margin: 0 !important; padding: 20px !important; }
   body { background: #fff; color: #000; }
   .card { border: 1px solid #ddd; box-shadow: none; }
+  .stat-card .stat-value,.cell-primary,.cell-mono,td,th { color:#000 !important; }
+  .theme-toggle,#theme-toggle { display:none !important; }
   table { font-size: 11px; }
 }
 </style>
@@ -458,6 +466,7 @@ tbody tr:last-child td { border-bottom: none; }
       <span>Fleet Manager</span>
     </div>
     <div class="topbar-right">
+      <button id="theme-toggle" onclick="toggleTheme()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:20px;padding:4px 14px;font-size:0.85rem;color:var(--text-2);cursor:pointer;transition:all var(--transition)">🌙 Dark</button>
       <div class="user-info">
         <strong id="user-display-name"></strong>
         <span id="user-role-badge" class="badge badge-green" style="margin-left:6px"></span>
@@ -540,6 +549,63 @@ let CURRENT_PAGE = 'dashboard';
 const LOGO_SRC = 'data:image/png;base64,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';
 document.getElementById('login-logo').src = LOGO_SRC;
 document.getElementById('topbar-logo').src = LOGO_SRC;
+
+
+// ─── THEME ────────────────────────────────────────────────────────────────────
+function toggleTheme(){
+  const html=document.documentElement;
+  const next=html.getAttribute('data-theme')==='dark'?'light':'dark';
+  html.setAttribute('data-theme',next);
+  localStorage.setItem('fleet_theme',next);
+  document.getElementById('theme-toggle').textContent=next==='dark'?'🌙 Dark':'☀️ Light';
+}
+(function(){const t=localStorage.getItem('fleet_theme')||'dark';document.documentElement.setAttribute('data-theme',t);
+  setTimeout(()=>{const b=document.getElementById('theme-toggle');if(b)b.textContent=t==='dark'?'🌙 Dark':'☀️ Light';},0);
+})();
+
+// ─── EXPORT CSV ──────────────────────────────────────────────────────────────
+function exportCSV(filename){
+  const table=document.querySelector('#main-content table');
+  if(!table){toast('No data to export','error');return;}
+  const rows=[...table.querySelectorAll('tr')];
+  const csv=rows.map(r=>{
+    const cells=[...r.querySelectorAll('th,td')];
+    // skip last column (actions)
+    return cells.slice(0,cells.length>2?-1:cells.length).map(c=>'"'+c.textContent.trim().replace(/"/g,'""')+'"').join(',');
+  }).join('\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename||'fleet_export.csv';a.click();
+  toast('CSV exported');
+}
+function printPage(){window.print();}
+
+// ─── AUTO-CALC FUEL ──────────────────────────────────────────────────────────
+function calcFuelTotal(){
+  const l=parseFloat(document.getElementById('ftx-litres')?.value)||0;
+  const c=parseFloat(document.getElementById('ftx-cpl')?.value)||0;
+  if(l>0&&c>0){document.getElementById('ftx-total').value=(l*c).toFixed(2);}
+}
+
+// ─── TABLE SORT (click column headers) ───────────────────────────────────────
+let _sortCol=-1,_sortAsc=true;
+document.addEventListener('click',e=>{
+  const th=e.target.closest('thead th');
+  if(!th)return;
+  const table=th.closest('table'),tbody=table?.querySelector('tbody');
+  if(!tbody)return;
+  const idx=[...th.parentElement.children].indexOf(th);
+  const asc=_sortCol===idx?!_sortAsc:true;_sortCol=idx;_sortAsc=asc;
+  const rows=[...tbody.querySelectorAll('tr')];
+  rows.sort((a,b)=>{
+    const at=a.children[idx]?.textContent.trim()||'',bt=b.children[idx]?.textContent.trim()||'';
+    const an=parseFloat(at.replace(/[^0-9.-]/g,'')),bn=parseFloat(bt.replace(/[^0-9.-]/g,''));
+    if(!isNaN(an)&&!isNaN(bn))return asc?an-bn:bn-an;
+    return asc?at.localeCompare(bt):bt.localeCompare(at);
+  });
+  rows.forEach(r=>tbody.appendChild(r));
+  table.querySelectorAll('thead th').forEach(h=>h.style.fontStyle='normal');
+  th.style.fontStyle=asc?'normal':'italic';
+});
 
 // ─── API HELPERS ─────────────────────────────────────────────────────────────
 async function api(path, opts = {}) {
@@ -741,7 +807,7 @@ async function renderDashboard() {
       const total = Number(v.fuel_cost) + Number(v.maint_cost);
       const pct = maxTotal > 0 ? (total / maxTotal * 100) : 0;
       return `<div class="cost-row">
-        <div class="cost-vehicle">${esc(v.unit_number)}<br><span style="font-size:0.75rem;color:var(--text-3)">${esc(v.registration)}</span></div>
+        <div class="cost-vehicle">${esc(v.registration)}<br><span style="font-size:0.72rem;color:var(--text-3)">${esc(v.unit_number)}</span></div>
         <div class="cost-bar-wrap"><div class="cost-bar" style="width:${pct}%"></div></div>
         <div class="cost-amount">GH₵${fmt(total)}</div>
       </div>`;
@@ -768,7 +834,7 @@ async function renderDashboard() {
     fuelEl.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Vehicle</th><th>Litres</th><th>Cost</th></tr></thead><tbody>${
       d.recent_fuel.map(f => `<tr>
         <td>${fmtDate(f.transaction_date)}</td>
-        <td class="cell-primary">${esc(f.unit_number)}</td>
+        <td class="cell-primary">${esc(f.registration||f.unit_number)}</td>
         <td>${fmt(f.litres,1)}</td>
         <td class="cell-mono">GH₵${fmt(f.total_cost)}</td>
       </tr>`).join('')}</tbody></table></div>`;
@@ -792,13 +858,13 @@ async function searchVehicles() {
   const vehicles = await get(`/vehicles${q ? '?search='+encodeURIComponent(q) : ''}`);
   const el = document.getElementById('vehicles-table');
   if (!vehicles.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">🚗</div><p>No vehicles found</p></div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Unit #</th><th>Registration</th><th>Make / Model</th><th>Year</th><th>Department</th><th>Odometer</th><th>Insurance</th><th>Roadworthy</th><th></th></tr></thead><tbody>${
+  el.innerHTML = `<table><thead><tr><th>Registration</th><th>Unit #</th><th>Make / Model</th><th>Year</th><th>Department</th><th>Odometer</th><th>Insurance</th><th>Roadworthy</th><th></th></tr></thead><tbody>${
     vehicles.map(v => {
       const insClass = v.insurance_expiry && new Date(v.insurance_expiry) < new Date() ? 'badge-red' : v.insurance_expiry && new Date(v.insurance_expiry) < new Date(Date.now()+30*86400000) ? 'badge-yellow' : 'badge-green';
       const rwClass = v.roadworthy_expiry && new Date(v.roadworthy_expiry) < new Date() ? 'badge-red' : v.roadworthy_expiry && new Date(v.roadworthy_expiry) < new Date(Date.now()+30*86400000) ? 'badge-yellow' : 'badge-green';
       return `<tr>
-        <td class="cell-primary cell-mono">${esc(v.unit_number)}</td>
-        <td class="cell-mono">${esc(v.registration)}</td>
+        <td class="cell-primary cell-mono">${esc(v.registration)}</td>
+        <td class="cell-mono">${esc(v.unit_number)}</td>
         <td>${esc(v.make||'')} ${esc(v.model||'')}</td>
         <td>${v.year||'—'}</td>
         <td>${esc(v.department_name||'—')}</td>
@@ -988,9 +1054,9 @@ async function renderTrips() {
   const mc = document.getElementById('main-content');
   mc.innerHTML = `
     <div class="page-header"><div><h2>Trip Log</h2></div>
-      <button class="btn btn-primary" onclick="openTripForm()">+ Log Trip</button></div>
+      <button class="btn btn-print btn-sm" onclick="printPage()">🖨️</button><button class="btn btn-export btn-sm" onclick="exportCSV('trips.csv')">📥</button><button class="btn btn-primary" onclick="openTripForm()">+ Log Trip</button></div>
     <div class="toolbar">
-      <select id="trip-vehicle" onchange="loadTrips()"><option value="">All Vehicles</option>${(LOOKUPS.vehicles||[]).map(v=>`<option value="${v.id}">${esc(v.unit_number)} - ${esc(v.registration)}</option>`).join('')}</select>
+      <select id="trip-vehicle" onchange="loadTrips()"><option value="">All Vehicles</option>${(LOOKUPS.vehicles||[]).map(v=>`<option value="${v.id}">${esc(v.registration)} — ${esc(v.unit_number)}</option>`).join('')}</select>
       <select id="trip-project" onchange="loadTrips()"><option value="">All Projects</option>${(LOOKUPS.projects||[]).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
       <input type="date" id="trip-from" onchange="loadTrips()" style="padding:9px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.85rem">
       <input type="date" id="trip-to" onchange="loadTrips()" style="padding:9px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.85rem">
@@ -1010,7 +1076,7 @@ async function loadTrips() {
   el.innerHTML = `<table><thead><tr><th>Date</th><th>Vehicle</th><th>Driver</th><th>Route</th><th>Purpose</th><th>Distance</th><th>Project</th><th></th></tr></thead><tbody>${
     trips.map(t => `<tr>
       <td>${fmtDate(t.trip_date)}</td>
-      <td class="cell-primary cell-mono">${esc(t.unit_number)}</td>
+      <td class="cell-primary">${esc(t.registration||t.unit_number)}</td>
       <td>${esc(t.driver_name||'—')}</td>
       <td>${esc(t.origin||'?')} → ${esc(t.destination||'?')}</td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.purpose)}">${esc(t.purpose)}</td>
@@ -1024,7 +1090,7 @@ async function openTripForm() {
   openModal('Log Trip', `
     <form id="trip-form">
       <div class="form-row">
-        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.unit_number} - ${v.registration}`)}</select></div>
+        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.registration} — ${v.unit_number}`)}</select></div>
         <div class="form-group"><label>Driver</label><select name="driver_id">${selectOpts(LOOKUPS.drivers,'id',d=>`${d.first_name} ${d.last_name}`)}</select></div>
       </div>
       <div class="form-row-3">
@@ -1091,7 +1157,7 @@ async function openFuelCardForm(id) {
     <form id="fuelcard-form">
       <div class="form-group"><label>Card Number *</label><input name="card_number" value="${esc(c.card_number||'')}" required></div>
       <div class="form-row">
-        <div class="form-group"><label>Vehicle</label><select name="vehicle_id">${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.unit_number} - ${v.registration}`,c.vehicle_id)}</select></div>
+        <div class="form-group"><label>Vehicle</label><select name="vehicle_id">${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.registration} — ${v.unit_number}`,c.vehicle_id)}</select></div>
         <div class="form-group"><label>Driver</label><select name="driver_id">${selectOpts(LOOKUPS.drivers,'id',d=>`${d.first_name} ${d.last_name}`,c.driver_id)}</select></div>
       </div>
       ${!id ? '<div class="form-group"><label>Initial Balance</label><input name="current_balance" type="number" step="0.01" value="0"></div>' : ''}
@@ -1157,9 +1223,9 @@ async function renderFuelTransactions() {
   const mc = document.getElementById('main-content');
   mc.innerHTML = `
     <div class="page-header"><div><h2>Fuel Transactions</h2></div>
-      <button class="btn btn-primary" onclick="openFuelTxForm()">+ Record Transaction</button></div>
+      <button class="btn btn-print btn-sm" onclick="printPage()">🖨️ Print</button><button class="btn btn-export btn-sm" onclick="exportCSV('fuel_transactions.csv')">📥 Export</button><button class="btn btn-primary" onclick="openFuelTxForm()">+ Record Transaction</button></div>
     <div class="toolbar">
-      <select id="ftx-vehicle" onchange="loadFuelTx()"><option value="">All Vehicles</option>${(LOOKUPS.vehicles||[]).map(v=>`<option value="${v.id}">${esc(v.unit_number)}</option>`).join('')}</select>
+      <select id="ftx-vehicle" onchange="loadFuelTx()"><option value="">All Vehicles</option>${(LOOKUPS.vehicles||[]).map(v=>`<option value="${v.id}">${esc(v.registration)} — ${esc(v.unit_number)}</option>`).join('')}</select>
       <select id="ftx-project" onchange="loadFuelTx()"><option value="">All Projects</option>${(LOOKUPS.projects||[]).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
       <input type="date" id="ftx-from" onchange="loadFuelTx()" style="padding:9px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.85rem">
       <input type="date" id="ftx-to" onchange="loadFuelTx()" style="padding:9px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.85rem">
@@ -1176,29 +1242,29 @@ async function loadFuelTx() {
   const txs = await get(`/fuel-transactions?${params}`);
   const el = document.getElementById('ftx-table');
   if (!txs.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">⛽</div><p>No transactions found</p></div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Date</th><th>Type</th><th>Vehicle</th><th>Driver</th><th>Station</th><th>Litres</th><th>Cost/L</th><th>Total</th><th>Card</th><th></th></tr></thead><tbody>${
+  el.innerHTML = `<table><thead><tr><th>Date</th><th>Type</th><th>Vehicle</th><th>Driver</th><th>Station</th><th>Litres</th><th>Cost/L</th><th>Total</th><th>Odometer</th><th>Card</th><th></th></tr></thead><tbody>${
     txs.map(t => `<tr>
       <td>${fmtDate(t.transaction_date)}</td>
       <td><span class="badge ${t.transaction_type==='purchase'?'badge-blue':t.transaction_type==='topup'?'badge-green':'badge-yellow'}">${t.transaction_type}</span></td>
-      <td class="cell-primary cell-mono">${esc(t.unit_number||'—')}</td>
+      <td class="cell-primary">${esc(t.registration||t.unit_number||'—')}</td>
       <td>${esc(t.driver_name||'—')}</td>
       <td>${esc(t.vendor_name||'—')}</td>
       <td class="cell-mono">${t.litres ? fmt(t.litres,1) : '—'}</td>
       <td class="cell-mono">${t.cost_per_litre ? fmt(t.cost_per_litre,2) : '—'}</td>
       <td class="cell-mono">GH₵${fmt(t.total_cost)}</td>
       <td class="cell-mono">${esc(t.card_number||'—')}</td>
-      <td class="cell-actions"><button class="btn btn-danger btn-sm" onclick="deleteFuelTx(${t.id})">✕</button></td>
+      <td class="cell-actions"><button class="btn btn-secondary btn-sm" onclick="openFuelTxForm(${t.id})" title="Edit">✎</button><button class="btn btn-danger btn-sm" onclick="deleteFuelTx(${t.id})" title="Delete">✕</button></td>
     </tr>`).join('')}</tbody></table>`;
 }
 async function deleteFuelTx(id) { if (confirm('Delete this transaction?')) { await del(`/fuel-transactions/${id}`); toast('Deleted'); loadFuelTx(); } }
 
-async function openFuelTxForm() {
+async function openFuelTxForm(editId) {
   openModal('Record Fuel Transaction', `
     <form id="fueltx-form">
       <div class="form-row-3">
         <div class="form-group"><label>Date *</label><input name="transaction_date" type="datetime-local" value="${new Date().toISOString().slice(0,16)}" required></div>
         <div class="form-group"><label>Type</label><select name="transaction_type"><option value="purchase">Purchase</option><option value="topup">Top-up</option><option value="transfer">Transfer</option></select></div>
-        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.unit_number}`)}</select></div>
+        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.registration} — ${v.unit_number}`)}</select></div>
       </div>
       <div class="form-row-3">
         <div class="form-group"><label>Driver</label><select name="driver_id">${selectOpts(LOOKUPS.drivers,'id',d=>`${d.first_name} ${d.last_name}`)}</select></div>
@@ -1211,9 +1277,9 @@ async function openFuelTxForm() {
         <div class="form-group"><label>Project</label><select name="project_id">${selectOpts(LOOKUPS.projects,'id','name')}</select></div>
       </div>
       <div class="form-row-3">
-        <div class="form-group"><label>Litres</label><input name="litres" type="number" step="0.001"></div>
-        <div class="form-group"><label>Cost per Litre</label><input name="cost_per_litre" type="number" step="0.0001"></div>
-        <div class="form-group"><label>Total Cost (GH₵)</label><input name="total_cost" type="number" step="0.01"></div>
+        <div class="form-group"><label>Litres</label><input id="ftx-litres" name="litres" type="number" step="0.001" oninput="calcFuelTotal()"></div>
+        <div class="form-group"><label>Cost per Litre</label><input id="ftx-cpl" name="cost_per_litre" type="number" step="0.0001" oninput="calcFuelTotal()"></div>
+        <div class="form-group"><label>Total Cost (GH₵) 🔄</label><input id="ftx-total" name="total_cost" type="number" step="0.01" class="auto-calc"></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Odometer Start</label><input name="odometer_start" type="number"></div>
@@ -1244,9 +1310,9 @@ async function renderMaintenance() {
   const mc = document.getElementById('main-content');
   mc.innerHTML = `
     <div class="page-header"><div><h2>Service Records</h2></div>
-      <button class="btn btn-primary" onclick="openMaintenanceForm()">+ Add Record</button></div>
+      <button class="btn btn-print btn-sm" onclick="printPage()">🖨️</button><button class="btn btn-export btn-sm" onclick="exportCSV('maintenance.csv')">📥</button><button class="btn btn-primary" onclick="openMaintenanceForm()">+ Add Record</button></div>
     <div class="toolbar">
-      <select id="maint-vehicle" onchange="loadMaintenance()"><option value="">All Vehicles</option>${(LOOKUPS.vehicles||[]).map(v=>`<option value="${v.id}">${esc(v.unit_number)}</option>`).join('')}</select>
+      <select id="maint-vehicle" onchange="loadMaintenance()"><option value="">All Vehicles</option>${(LOOKUPS.vehicles||[]).map(v=>`<option value="${v.id}">${esc(v.registration)} — ${esc(v.unit_number)}</option>`).join('')}</select>
     </div>
     <div class="card"><div class="card-body no-pad"><div class="table-wrap" id="maint-table"></div></div></div>`;
   loadMaintenance();
@@ -1259,7 +1325,7 @@ async function loadMaintenance() {
   el.innerHTML = `<table><thead><tr><th>Date</th><th>Vehicle</th><th>Type</th><th>Description</th><th>Vendor</th><th>Labour</th><th>Parts</th><th>Total</th><th>Next Due</th><th></th></tr></thead><tbody>${
     recs.map(r => `<tr>
       <td>${fmtDate(r.service_date)}</td>
-      <td class="cell-primary cell-mono">${esc(r.unit_number)}</td>
+      <td class="cell-primary">${esc(r.registration||r.unit_number)}</td>
       <td>${esc(r.type_name||'—')}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.description)}</td>
       <td>${esc(r.vendor_name||'—')}</td>
@@ -1277,7 +1343,7 @@ async function openMaintenanceForm(id) {
   openModal(id ? 'Edit Service Record' : 'Add Service Record', `
     <form id="maint-form">
       <div class="form-row">
-        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.unit_number} - ${v.registration}`,r.vehicle_id)}</select></div>
+        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.registration} — ${v.unit_number}`,r.vehicle_id)}</select></div>
         <div class="form-group"><label>Service Type</label><select name="maintenance_type_id">${selectOpts(LOOKUPS.maintenance_types,'id','name',r.maintenance_type_id)}</select></div>
       </div>
       <div class="form-row-3">
@@ -1342,7 +1408,7 @@ async function openInsuranceForm() {
   openModal('Add Insurance Record', `
     <form id="ins-form">
       <div class="form-row">
-        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.unit_number} - ${v.registration}`)}</select></div>
+        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.registration} — ${v.unit_number}`)}</select></div>
         <div class="form-group"><label>Policy Number</label><input name="policy_number"></div>
       </div>
       <div class="form-row-3">
@@ -1393,7 +1459,7 @@ async function openRoadworthyForm() {
   openModal('Add Roadworthy Record', `
     <form id="rw-form">
       <div class="form-row">
-        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.unit_number} - ${v.registration}`)}</select></div>
+        <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.registration} — ${v.unit_number}`)}</select></div>
         <div class="form-group"><label>Certificate #</label><input name="certificate_number"></div>
       </div>
       <div class="form-row-3">
@@ -1569,7 +1635,7 @@ async function saveProject(id) {
 async function renderReports() {
   const mc = document.getElementById('main-content');
   mc.innerHTML = `
-    <div class="page-header"><div><h2>Reports</h2><div class="subtitle">Fleet analytics and cost reports</div></div></div>
+    <div class="page-header"><div><h2>Reports</h2><div class="subtitle">Fleet analytics</div></div><div style="display:flex;gap:8px"><button class="btn btn-print btn-sm" onclick="printPage()">🖨️ Print</button><button class="btn btn-export btn-sm" onclick="exportCSV('report.csv')">📥 Export CSV</button></div></div>
     <div class="tabs" id="report-tabs">
       <button class="tab-btn active" onclick="loadReport('vehicles',this)">Vehicles</button>
       <button class="tab-btn" onclick="loadReport('fuel',this)">Fuel</button>
@@ -1589,10 +1655,10 @@ async function loadReport(type, btn) {
   const data = await get(`/reports/${type}`);
   
   if (type === 'vehicles') {
-    el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Unit</th><th>Reg</th><th>Make/Model</th><th>Dept</th><th>Fuel Cost</th><th>Maint Cost</th><th>Insurance</th><th>Total</th></tr></thead><tbody>${
+    el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Reg</th><th>Unit</th><th>Make/Model</th><th>Dept</th><th>Fuel Cost</th><th>Maint Cost</th><th>Insurance</th><th>Total</th></tr></thead><tbody>${
       data.map(v => `<tr>
-        <td class="cell-primary cell-mono">${esc(v.unit_number)}</td>
-        <td class="cell-mono">${esc(v.registration)}</td>
+        <td class="cell-primary cell-mono">${esc(v.registration)}</td>
+        <td class="cell-mono">${esc(v.unit_number)}</td>
         <td>${esc(v.make||'')} ${esc(v.model||'')}</td>
         <td>${esc(v.department||'—')}</td>
         <td class="cell-mono">GH₵${fmt(v.total_fuel_cost)}</td>
@@ -1601,16 +1667,19 @@ async function loadReport(type, btn) {
         <td class="cell-mono" style="font-weight:600">GH₵${fmt(v.total_cost)}</td>
       </tr>`).join('')}</tbody></table></div>`;
   } else if (type === 'fuel') {
-    el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Vehicle</th><th>Driver</th><th>Station</th><th>Fuel</th><th>Litres</th><th>Cost/L</th><th>Total</th><th>Project</th></tr></thead><tbody>${
+    el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Vehicle</th><th>Driver</th><th>Station</th><th>Fuel</th><th>Litres</th><th>Cost/L</th><th>Total</th><th>Odo Start</th><th>Odo End</th><th>Distance</th><th>Project</th></tr></thead><tbody>${
       data.map(f => `<tr>
         <td>${fmtDate(f.transaction_date)}</td>
-        <td class="cell-mono">${esc(f.unit_number)}</td>
+        <td class="cell-primary">${esc(f.registration||f.unit_number)}</td>
         <td>${esc(f.driver||'—')}</td>
         <td>${esc(f.station||'—')}</td>
         <td>${esc(f.fuel_type||'—')}</td>
         <td class="cell-mono">${fmt(f.litres,1)}</td>
         <td class="cell-mono">${fmt(f.cost_per_litre)}</td>
         <td class="cell-mono">GH₵${fmt(f.total_cost)}</td>
+        <td class="cell-mono">${f.odometer_start||'—'}</td>
+        <td class="cell-mono">${f.odometer_end||'—'}</td>
+        <td class="cell-mono">${(f.odometer_end&&f.odometer_start)?(f.odometer_end-f.odometer_start).toLocaleString()+' km':'—'}</td>
         <td>${esc(f.project||'—')}</td>
       </tr>`).join('')}</tbody></table></div>`;
   } else if (type === 'personnel') {
@@ -1647,21 +1716,37 @@ async function loadReport(type, btn) {
       </tr>`).join('')}</tbody></table></div>`;
   } else if (type === 'fuel-cards') {
     const fc = data;
-    el.innerHTML = `
-      <div class="stat-grid" style="padding:20px 20px 0">
-        <div class="stat-card"><div class="stat-label">Total Balance</div><div class="stat-value accent" style="font-size:1.2rem">GH₵${fmt(fc.summary.total_balance)}</div></div>
-        <div class="stat-card"><div class="stat-label">Total Top-ups</div><div class="stat-value" style="font-size:1.2rem">GH₵${fmt(fc.summary.total_topups)}</div></div>
-        <div class="stat-card"><div class="stat-label">Total Expenses</div><div class="stat-value" style="font-size:1.2rem">GH₵${fmt(fc.summary.total_expenses)}</div></div>
+    const tBal=fc.summary.total_balance,tTop=fc.summary.total_topups,tExp=fc.summary.total_expenses;
+    el.innerHTML = `<div style="padding:24px">
+      <div style="text-align:center;margin-bottom:20px;padding-bottom:12px;border-bottom:3px solid var(--text)">
+        <h3 style="font-size:1.4rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Fuel Cards</h3>
       </div>
-      <div class="table-wrap" style="padding:0 20px 20px"><table><thead><tr><th>Card #</th><th>Vehicle</th><th>Balance</th><th>Total Top-ups</th><th>Total Expenses</th><th>Last Used</th></tr></thead><tbody>${
-        fc.cards.map(c => `<tr>
-          <td class="cell-primary cell-mono">${esc(c.card_number)}</td>
-          <td>${c.unit_number ? esc(c.unit_number)+' ('+esc(c.registration)+')' : '—'}</td>
-          <td class="cell-mono"><span class="badge ${Number(c.current_balance)<=0?'badge-red':Number(c.current_balance)<=500?'badge-yellow':'badge-green'}">GH₵${fmt(c.current_balance)}</span></td>
-          <td class="cell-mono">GH₵${fmt(c.total_topups)}</td>
-          <td class="cell-mono">GH₵${fmt(c.total_expenses)}</td>
-          <td>${c.last_used ? fmtDate(c.last_used) : '—'}</td>
-        </tr>`).join('')}</tbody></table></div>`;
+      <table style="width:100%;border:2px solid var(--text)"><thead><tr>
+        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem">Number</th>
+        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem">Type of Fuel Card</th>
+        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem">Vehicle</th>
+        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem;text-align:right">Amount</th>
+        <th style="border:1px solid var(--border);background:var(--surface-3);color:var(--text);text-transform:none;font-size:0.85rem">Note</th>
+      </tr></thead><tbody>${fc.cards.map(c=>`<tr>
+        <td style="border:1px solid var(--border);padding:8px 12px" class="cell-mono">${esc(c.card_number)}</td>
+        <td style="border:1px solid var(--border);padding:8px 12px">${esc(c.card_type||'GO CARD')}</td>
+        <td style="border:1px solid var(--border);padding:8px 12px">${c.unit_number?esc(c.unit_number)+' — '+esc(c.registration||''):'—'}</td>
+        <td style="border:1px solid var(--border);padding:8px 12px;text-align:right;font-family:var(--mono)">${fmt(c.current_balance)}</td>
+        <td style="border:1px solid var(--border);padding:8px 12px">Cash Bal</td>
+      </tr>`).join('')}
+      <tr><td colspan="3" style="border:1px solid var(--border);padding:8px 12px;text-align:center;font-weight:700;border-top:3px solid var(--text);background:var(--surface-2)">TOTAL</td>
+        <td style="border:1px solid var(--border);padding:8px 12px;text-align:right;font-family:var(--mono);font-weight:700;border-top:3px solid var(--text);background:var(--surface-2)">${fmt(tBal)}</td>
+        <td style="border:1px solid var(--border);padding:8px 12px;border-top:3px solid var(--text);background:var(--surface-2)"></td></tr>
+      </tbody></table>
+      <table style="margin-top:24px;margin-left:auto;width:340px;border:2px solid var(--text)"><tbody>
+        <tr><td style="border:1px solid var(--border);padding:6px 12px"><strong>SUMMARY</strong></td><td style="border:1px solid var(--border);padding:6px 12px"></td></tr>
+        <tr><td style="border:1px solid var(--border);padding:6px 12px;font-weight:600">Cash bal. B/F</td><td style="border:1px solid var(--border);padding:6px 12px;text-align:right;font-family:var(--mono)">${fmt(tBal-tTop+tExp)}</td></tr>
+        <tr><td style="border:1px solid var(--border);padding:6px 12px;font-weight:600">Cash Deposit</td><td style="border:1px solid var(--border);padding:6px 12px;text-align:right;font-family:var(--mono)">${fmt(tTop)}</td></tr>
+        <tr style="background:var(--surface-2)"><td style="border:1px solid var(--border);padding:6px 12px;font-weight:700">Total Cash</td><td style="border:1px solid var(--border);padding:6px 12px;text-align:right;font-family:var(--mono);font-weight:700">${fmt(tBal+tExp)}</td></tr>
+        <tr><td style="border:1px solid var(--border);padding:6px 12px;font-weight:600">Fuel Expenses</td><td style="border:1px solid var(--border);padding:6px 12px;text-align:right;font-family:var(--mono);color:var(--danger)">-${fmt(tExp)}</td></tr>
+        <tr><td style="border:2px solid var(--text);padding:6px 12px;font-weight:700">Cash bal. C/F</td><td style="border:2px solid var(--text);padding:6px 12px;text-align:right;font-family:var(--mono);font-weight:700;text-decoration:underline">${fmt(tBal)}</td></tr>
+      </tbody></table>
+    </div>`;
   }
 }
 
