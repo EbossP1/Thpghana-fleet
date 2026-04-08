@@ -64,7 +64,7 @@ class VehicleCreate(BaseModel):
     insurance_policy:Optional[str]=None; insurance_vendor_id:Optional[int]=None
     insurance_expiry:Optional[str]=None; insurance_cost:Optional[float]=None
     roadworthy_number:Optional[str]=None; roadworthy_expiry:Optional[str]=None; roadworthy_cost:Optional[float]=None
-    notes:Optional[str]=None
+    notes:Optional[str]=None; photo_url:Optional[str]=None
 
 class DriverCreate(BaseModel):
     employee_number:Optional[str]=None; first_name:str; last_name:str
@@ -72,7 +72,7 @@ class DriverCreate(BaseModel):
     department_id:Optional[int]=None; licence_number:Optional[str]=None
     licence_expiry:Optional[str]=None; licence_state:Optional[str]=None
     health_ref:Optional[str]=None; health_expiry:Optional[str]=None
-    hire_date:Optional[str]=None; hourly_wage:Optional[float]=0; notes:Optional[str]=None
+    hire_date:Optional[str]=None; hourly_wage:Optional[float]=0; notes:Optional[str]=None; photo_url:Optional[str]=None
 
 class FuelCardCreate(BaseModel):
     card_number:str; card_type:Optional[str]="GO CARD"
@@ -225,12 +225,12 @@ def create_vehicle(data:VehicleCreate,user=Depends(get_current_user)):
     row=execute("""INSERT INTO vehicles (unit_number,registration,vin,make,model,year,color,engine_number,
         vehicle_type_id,fuel_type_id,department_id,group_id,tank_capacity,current_odometer,
         purchase_date,purchase_cost,purchase_vendor_id,insurance_policy,insurance_vendor_id,
-        insurance_expiry,insurance_cost,roadworthy_number,roadworthy_expiry,roadworthy_cost,notes)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        insurance_expiry,insurance_cost,roadworthy_number,roadworthy_expiry,roadworthy_cost,notes,photo_url)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (data.unit_number,data.registration,data.vin,data.make,data.model,data.year,data.color,data.engine_number,
          data.vehicle_type_id,data.fuel_type_id,data.department_id,data.group_id,data.tank_capacity,data.current_odometer,
          data.purchase_date,data.purchase_cost,data.purchase_vendor_id,data.insurance_policy,data.insurance_vendor_id,
-         data.insurance_expiry,data.insurance_cost,data.roadworthy_number,data.roadworthy_expiry,data.roadworthy_cost,data.notes))
+         data.insurance_expiry,data.insurance_cost,data.roadworthy_number,data.roadworthy_expiry,data.roadworthy_cost,data.notes,data.photo_url))
     _refresh_vehicle_reminders(row["id"])
     return {"id":row["id"],"message":"Vehicle created"}
 
@@ -239,11 +239,11 @@ def update_vehicle(vid:int,data:VehicleCreate,user=Depends(get_current_user)):
     execute("""UPDATE vehicles SET unit_number=%s,registration=%s,vin=%s,make=%s,model=%s,year=%s,color=%s,
         engine_number=%s,vehicle_type_id=%s,fuel_type_id=%s,department_id=%s,group_id=%s,tank_capacity=%s,
         insurance_policy=%s,insurance_vendor_id=%s,insurance_expiry=%s,insurance_cost=%s,
-        roadworthy_number=%s,roadworthy_expiry=%s,roadworthy_cost=%s,notes=%s,updated_at=NOW() WHERE id=%s""",
+        roadworthy_number=%s,roadworthy_expiry=%s,roadworthy_cost=%s,notes=%s,photo_url=%s,updated_at=NOW() WHERE id=%s""",
         (data.unit_number,data.registration,data.vin,data.make,data.model,data.year,data.color,data.engine_number,
          data.vehicle_type_id,data.fuel_type_id,data.department_id,data.group_id,data.tank_capacity,
          data.insurance_policy,data.insurance_vendor_id,data.insurance_expiry,data.insurance_cost,
-         data.roadworthy_number,data.roadworthy_expiry,data.roadworthy_cost,data.notes,vid))
+         data.roadworthy_number,data.roadworthy_expiry,data.roadworthy_cost,data.notes,data.photo_url,vid))
     _refresh_vehicle_reminders(vid)
     return {"message":"Updated"}
 
@@ -284,11 +284,11 @@ def get_drivers(search:Optional[str]=None,user=Depends(get_current_user)):
 @app.post("/api/drivers",status_code=201)
 def create_driver(data:DriverCreate,user=Depends(get_current_user)):
     row=execute("""INSERT INTO drivers (employee_number,first_name,last_name,job_title,email,phone,
-        department_id,licence_number,licence_expiry,licence_state,health_ref,health_expiry,hire_date,hourly_wage,notes)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        department_id,licence_number,licence_expiry,licence_state,health_ref,health_expiry,hire_date,hourly_wage,notes,photo_url)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (data.employee_number,data.first_name,data.last_name,data.job_title,data.email,data.phone,
          data.department_id,data.licence_number,data.licence_expiry,data.licence_state,
-         data.health_ref,data.health_expiry,data.hire_date,data.hourly_wage,data.notes))
+         data.health_ref,data.health_expiry,data.hire_date,data.hourly_wage,data.notes,data.photo_url))
     _refresh_driver_reminders(row["id"])
     return {"id":row["id"],"message":"Driver created"}
 
@@ -296,10 +296,10 @@ def create_driver(data:DriverCreate,user=Depends(get_current_user)):
 def update_driver(did:int,data:DriverCreate,user=Depends(get_current_user)):
     execute("""UPDATE drivers SET employee_number=%s,first_name=%s,last_name=%s,job_title=%s,email=%s,phone=%s,
         department_id=%s,licence_number=%s,licence_expiry=%s,licence_state=%s,health_ref=%s,health_expiry=%s,
-        hire_date=%s,hourly_wage=%s,notes=%s,updated_at=NOW() WHERE id=%s""",
+        hire_date=%s,hourly_wage=%s,notes=%s,photo_url=%s,updated_at=NOW() WHERE id=%s""",
         (data.employee_number,data.first_name,data.last_name,data.job_title,data.email,data.phone,
          data.department_id,data.licence_number,data.licence_expiry,data.licence_state,
-         data.health_ref,data.health_expiry,data.hire_date,data.hourly_wage,data.notes,did))
+         data.health_ref,data.health_expiry,data.hire_date,data.hourly_wage,data.notes,data.photo_url,did))
     _refresh_driver_reminders(did)
     return {"message":"Updated"}
 
