@@ -665,6 +665,26 @@ document.addEventListener('click',e=>{
   th.style.fontStyle=asc?'normal':'italic';
 });
 
+
+// ─── PHOTO UPLOAD ────────────────────────────────────────────────────────────
+async function uploadPhoto(type, id, input) {
+  if (!id || !input.files[0]) { toast('Save the record first, then upload photo', 'error'); return; }
+  var file = input.files[0];
+  if (file.size > 2000000) { toast('Photo must be under 2MB', 'error'); return; }
+  var formData = new FormData();
+  formData.append('file', file);
+  try {
+    var headers = {};
+    if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
+    var res = await fetch(API + '/' + type + '/' + id + '/photo', { method: 'POST', headers: headers, body: formData });
+    if (!res.ok) throw new Error('Upload failed');
+    toast('Photo uploaded');
+    // Refresh the page
+    if (type === 'vehicles') searchVehicles();
+    else if (type === 'drivers') searchDrivers();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
 // ─── API HELPERS ─────────────────────────────────────────────────────────────
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
@@ -929,7 +949,7 @@ async function searchVehicles() {
       const insClass = v.insurance_expiry && new Date(v.insurance_expiry) < new Date() ? 'badge-red' : v.insurance_expiry && new Date(v.insurance_expiry) < new Date(Date.now()+30*86400000) ? 'badge-yellow' : 'badge-green';
       const rwClass = v.roadworthy_expiry && new Date(v.roadworthy_expiry) < new Date() ? 'badge-red' : v.roadworthy_expiry && new Date(v.roadworthy_expiry) < new Date(Date.now()+30*86400000) ? 'badge-yellow' : 'badge-green';
       return `<tr>
-        <td class="cell-primary cell-mono">${esc(v.registration)}</td>
+        <td class="cell-primary"><div style="display:flex;align-items:center;gap:8px">${v.photo_url ? '<img src="'+esc(v.photo_url)+'" style="width:36px;height:36px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border)" onerror="this.style.display=\'none\'">' : ''}<span class="cell-mono">'+esc(v.registration)+'</span></div></td>
         <td class="cell-mono">${esc(v.unit_number)}</td>
         <td>${esc(v.make||'')} ${esc(v.model||'')}</td>
         <td>${v.year||'—'}</td>
@@ -1013,7 +1033,11 @@ async function openVehicleForm(id) {
         <div class="form-group"><label>Roadworthy Expiry</label><input name="roadworthy_expiry" type="date" value="${v.roadworthy_expiry ? v.roadworthy_expiry.slice(0,10) : ''}"></div>
         <div class="form-group"><label>Roadworthy Cost</label><input name="roadworthy_cost" type="number" step="0.01" value="${v.roadworthy_cost||''}"></div>
       </div>
-      <div class="form-group"><label>Vehicle Photo URL</label><input name="photo_url" value="${esc(v.photo_url||'')}" placeholder="Paste image URL (e.g. Imgur, Google Drive public link)"></div>
+      <div class="form-group"><label>Vehicle Photo</label>
+        <div style="display:flex;align-items:center;gap:12px">
+          ${v.photo_url ? '<img src="'+esc(v.photo_url)+'" style="width:64px;height:64px;object-fit:cover;border-radius:var(--radius);border:1px solid var(--border)" onerror="this.style.display=\'none\'">' : '<div style="width:64px;height:64px;border-radius:var(--radius);background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:1.5rem">🚗</div>'}
+          <input type="file" accept="image/*" onchange="uploadPhoto('vehicles',${id||'null'},this)" style="font-size:0.85rem">
+        </div></div>
       <div class="form-group"><label>Notes</label><textarea name="notes">${esc(v.notes||'')}</textarea></div>
     </form>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -1332,7 +1356,8 @@ async function openFuelTxForm(editId) {
     <form id="fueltx-form">
       <div class="form-row-3">
         <div class="form-group"><label>Date *</label><input name="transaction_date" type="datetime-local" value="${new Date().toISOString().slice(0,16)}" required></div>
-        <div class="form-group"><label>Type</label><select name="transaction_type"><option value="purchase">Purchase</option><option value="topup">Top-up</option><option value="transfer">Transfer</option></select></div>
+        <div class="form-group"><label>Type</label><select name="transaction_type" onchange="document.getElementById('transfer-to-group').style.display=this.value==='transfer'?'block':'none'"><option value="purchase">Purchase</option><option value="topup">Top-up</option><option value="transfer">Transfer</option></select></div>
+        <div class="form-group" id="transfer-to-group" style="display:none"><label>Transfer To Card *</label><select name="transfer_to_card_id">${selectOpts(LOOKUPS.fuel_cards,'id',c=>`${c.card_number}${c.unit_number?' ('+c.unit_number+')':''}`)}</select></div>
         <div class="form-group"><label>Vehicle *</label><select name="vehicle_id" required>${selectOpts(LOOKUPS.vehicles,'id',v=>`${v.registration} — ${v.unit_number}`)}</select></div>
       </div>
       <div class="form-row-3">
@@ -1727,7 +1752,7 @@ async function loadReport(type, btn) {
   if (type === 'vehicles') {
     el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Reg</th><th>Unit</th><th>Make/Model</th><th>Dept</th><th>Fuel Cost</th><th>Maint Cost</th><th>Insurance</th><th>Total</th></tr></thead><tbody>${
       data.map(v => `<tr>
-        <td class="cell-primary cell-mono">${esc(v.registration)}</td>
+        <td class="cell-primary"><div style="display:flex;align-items:center;gap:8px">${v.photo_url ? '<img src="'+esc(v.photo_url)+'" style="width:36px;height:36px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border)" onerror="this.style.display=\'none\'">' : ''}<span class="cell-mono">'+esc(v.registration)+'</span></div></td>
         <td class="cell-mono">${esc(v.unit_number)}</td>
         <td>${esc(v.make||'')} ${esc(v.model||'')}</td>
         <td>${esc(v.department||'—')}</td>
@@ -1737,21 +1762,77 @@ async function loadReport(type, btn) {
         <td class="cell-mono" style="font-weight:600">GH₵${fmt(v.total_cost)}</td>
       </tr>`).join('')}</tbody></table></div>`;
   } else if (type === 'fuel') {
-    el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Vehicle</th><th>Driver</th><th>Station</th><th>Fuel</th><th>Litres</th><th>Cost/L</th><th>Total</th><th>Odo Start</th><th>Odo End</th><th>Distance</th><th>Project</th></tr></thead><tbody>${
-      data.map(f => `<tr>
-        <td>${fmtDate(f.transaction_date)}</td>
-        <td class="cell-primary">${esc(f.registration||f.unit_number)}</td>
-        <td>${esc(f.driver||'—')}</td>
-        <td>${esc(f.station||'—')}</td>
-        <td>${esc(f.fuel_type||'—')}</td>
-        <td class="cell-mono">${fmt(f.litres,1)}</td>
-        <td class="cell-mono">${fmt(f.cost_per_litre)}</td>
-        <td class="cell-mono">GH₵${fmt(f.total_cost)}</td>
-        <td class="cell-mono">${f.odometer_start||'—'}</td>
-        <td class="cell-mono">${f.odometer_end||'—'}</td>
-        <td class="cell-mono">${(f.odometer_end&&f.odometer_start)?(f.odometer_end-f.odometer_start).toLocaleString()+' km':'—'}</td>
-        <td>${esc(f.project||'—')}</td>
-      </tr>`).join('')}</tbody></table></div>`;
+    // Fuel report with filters and grouped by vehicle
+    var filterHtml = '<div style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid var(--border)">';
+    filterHtml += '<select id="rf-vehicle" onchange="loadReport(\'fuel\')" style="padding:8px 28px 8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-2);font-size:0.85rem;appearance:none"><option value="">All Vehicles</option>';
+    (LOOKUPS.vehicles||[]).forEach(function(v){ filterHtml += '<option value="'+v.id+'">'+esc(v.registration)+' \u2014 '+esc(v.unit_number)+'</option>'; });
+    filterHtml += '</select>';
+    filterHtml += '<select id="rf-project" onchange="loadReport(\'fuel\')" style="padding:8px 28px 8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-2);font-size:0.85rem;appearance:none"><option value="">All Projects</option>';
+    (LOOKUPS.projects||[]).forEach(function(p){ filterHtml += '<option value="'+p.id+'">'+esc(p.name)+'</option>'; });
+    filterHtml += '</select>';
+    filterHtml += '<input type="date" id="rf-from" onchange="loadReport(\'fuel\')" style="padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.85rem">';
+    filterHtml += '<input type="date" id="rf-to" onchange="loadReport(\'fuel\')" style="padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.85rem">';
+    filterHtml += '</div>';
+
+    var qp = new URLSearchParams();
+    var rfv = document.getElementById('rf-vehicle'); if (rfv && rfv.value) qp.set('vehicle_id', rfv.value);
+    var rfp = document.getElementById('rf-project'); if (rfp && rfp.value) qp.set('project_id', rfp.value);
+    var rff = document.getElementById('rf-from'); if (rff && rff.value) qp.set('date_from', rff.value);
+    var rft = document.getElementById('rf-to'); if (rft && rft.value) qp.set('date_to', rft.value);
+
+    var fuelData;
+    try { fuelData = await get('/reports/fuel?' + qp); } catch(err) { el.innerHTML = '<div class="empty-state"><p>Error: '+esc(err.message)+'</p></div>'; return; }
+
+    // Group by vehicle
+    var groups = {};
+    var groupOrder = [];
+    for (var i = 0; i < fuelData.length; i++) {
+      var f = fuelData[i];
+      var vkey = (f.registration || f.unit_number || 'Unknown');
+      if (!groups[vkey]) { groups[vkey] = { rows: [], totalLitres: 0, totalCost: 0, vehicle: vkey, unit: f.unit_number||'', make: '' }; groupOrder.push(vkey); }
+      groups[vkey].rows.push(f);
+      groups[vkey].totalLitres += Number(f.litres) || 0;
+      groups[vkey].totalCost += Number(f.total_cost) || 0;
+    }
+
+    var rhtml = filterHtml + '<div style="padding:8px 20px">';
+    var grandTotalLitres = 0, grandTotalCost = 0;
+
+    for (var g = 0; g < groupOrder.length; g++) {
+      var grp = groups[groupOrder[g]];
+      grandTotalLitres += grp.totalLitres;
+      grandTotalCost += grp.totalCost;
+      rhtml += '<h4 style="margin:20px 0 8px;font-size:0.95rem"><span style="color:var(--accent)">Vehicle:</span> <span style="color:var(--text);font-weight:700">' + esc(grp.unit) + ' \u2014 ' + esc(grp.vehicle) + '</span></h4>';
+      rhtml += '<table style="width:100%;margin-bottom:4px"><thead><tr><th>Date</th><th>Station</th><th>Driver</th><th>Location</th><th>Litres</th><th>Cost/L</th><th>Total</th><th>Distance</th><th>Ref</th></tr></thead><tbody>';
+      for (var r = 0; r < grp.rows.length; r++) {
+        var f = grp.rows[r];
+        var dist = (f.odometer_end && f.odometer_start) ? (f.odometer_end - f.odometer_start) : null;
+        rhtml += '<tr><td>'+fmtDate(f.transaction_date)+'</td>';
+        rhtml += '<td>'+esc(f.station||'\u2014')+'</td>';
+        rhtml += '<td>'+esc(f.driver||'\u2014')+'</td>';
+        rhtml += '<td>'+esc(f.location||'\u2014')+'</td>';
+        rhtml += '<td class="cell-mono">'+fmt(f.litres,3)+'</td>';
+        rhtml += '<td class="cell-mono">GH\u20B5'+fmt(f.cost_per_litre)+'</td>';
+        rhtml += '<td class="cell-mono" style="font-weight:600">GH\u20B5'+fmt(f.total_cost)+'</td>';
+        rhtml += '<td class="cell-mono">'+(dist ? dist.toLocaleString()+' km' : '\u2014')+'</td>';
+        rhtml += '<td>'+esc(f.reference||f.project||'\u2014')+'</td></tr>';
+      }
+      rhtml += '<tr style="background:var(--surface-2);font-weight:700"><td colspan="4" style="text-align:right;padding:8px 16px;border-top:2px solid var(--text)">Total group:</td>';
+      rhtml += '<td class="cell-mono" style="padding:8px 16px;border-top:2px solid var(--text)">'+fmt(grp.totalLitres,3)+'</td><td style="border-top:2px solid var(--text)"></td>';
+      rhtml += '<td class="cell-mono" style="padding:8px 16px;border-top:2px solid var(--text)">GH\u20B5'+fmt(grp.totalCost)+'</td><td style="border-top:2px solid var(--text)"></td><td style="border-top:2px solid var(--text)"></td></tr>';
+      rhtml += '</tbody></table>';
+    }
+
+    if (groupOrder.length > 1) {
+      rhtml += '<div style="margin-top:16px;padding:12px 16px;background:var(--surface-2);border-radius:var(--radius);border:2px solid var(--text);display:flex;justify-content:space-between;font-weight:700">';
+      rhtml += '<span>GRAND TOTAL</span>';
+      rhtml += '<span>'+fmt(grandTotalLitres,3)+' litres \u2022 GH\u20B5'+fmt(grandTotalCost)+'</span></div>';
+    }
+
+    if (groupOrder.length === 0) rhtml += '<div class="empty-state"><p>No fuel transactions found</p></div>';
+    rhtml += '</div>';
+    el.innerHTML = rhtml;
+    return;
   } else if (type === 'personnel') {
     el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Emp #</th><th>Name</th><th>Title</th><th>Dept</th><th>Trips</th><th>Total KM</th><th>Fuel Entries</th><th>Fuel Cost</th></tr></thead><tbody>${
       data.map(d => `<tr>
