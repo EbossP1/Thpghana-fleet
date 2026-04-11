@@ -802,7 +802,7 @@ function navigate(page) {
     users: renderUsers,
     settings: renderSettings,
   };
-  if (pages[page]) pages[page]().catch(err => { mc.innerHTML = `<div class="empty-state"><p>Error loading page: ${esc(err.message)}</p></div>`; });
+  if (pages[page]) pages[page]().catch(err => { mc.innerHTML = '<div class="empty-state"><p>Error: ' + (err.message||'Unknown error') + '</p><p style="color:var(--text-3);font-size:0.82rem;margin-top:8px">Check browser console (F12) for details</p></div>'; console.error('Page load error:', err); });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1721,7 +1721,8 @@ async function loadReport(type, btn) {
   if (btn) document.querySelectorAll('#report-tabs .tab-btn').forEach(b => b.classList.toggle('active', b === btn));
   const el = document.getElementById('report-content');
   el.innerHTML = '<div class="page-loading" style="min-height:200px"><div class="spinner"></div></div>';
-  const data = await get(`/reports/${type}`);
+  var data;
+  try { data = await get('/reports/' + type); } catch(err) { el.innerHTML = '<div class="empty-state"><p>Error loading report: ' + esc(err.message) + '</p></div>'; return; }
   
   if (type === 'vehicles') {
     el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Reg</th><th>Unit</th><th>Make/Model</th><th>Dept</th><th>Fuel Cost</th><th>Maint Cost</th><th>Insurance</th><th>Total</th></tr></thead><tbody>${
