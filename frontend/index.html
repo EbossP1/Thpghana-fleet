@@ -949,7 +949,7 @@ async function searchVehicles() {
       const insClass = v.insurance_expiry && new Date(v.insurance_expiry) < new Date() ? 'badge-red' : v.insurance_expiry && new Date(v.insurance_expiry) < new Date(Date.now()+30*86400000) ? 'badge-yellow' : 'badge-green';
       const rwClass = v.roadworthy_expiry && new Date(v.roadworthy_expiry) < new Date() ? 'badge-red' : v.roadworthy_expiry && new Date(v.roadworthy_expiry) < new Date(Date.now()+30*86400000) ? 'badge-yellow' : 'badge-green';
       return `<tr>
-        <td class="cell-primary"><div style="display:flex;align-items:center;gap:8px">${v.photo_url ? '<img src="'+esc(v.photo_url)+'" style="width:36px;height:36px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border)" onerror="this.style.display=\'none\'">' : ''}<span class="cell-mono">'+esc(v.registration)+'</span></div></td>
+        <td class="cell-primary"><div style="display:flex;align-items:center;gap:8px">${v.photo_url ? '<img src="'+v.photo_url+'" style="width:36px;height:36px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border)" onerror="this.style.display=\'none\'">' : '<div style="width:36px;height:36px;border-radius:var(--radius-sm);background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:0.9rem;flex-shrink:0">🚗</div>'}<span class="cell-mono">${esc(v.registration)}</span></div></td>
         <td class="cell-mono">${esc(v.unit_number)}</td>
         <td>${esc(v.make||'')} ${esc(v.model||'')}</td>
         <td>${v.year||'—'}</td>
@@ -1083,7 +1083,7 @@ async function searchDrivers() {
       <td class="cell-primary"><div style="display:flex;align-items:center;gap:8px">${d.photo_url?'<img src="'+esc(d.photo_url)+'" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:1px solid var(--border)" onerror="this.style.display=\'none\'">':''}<span>${esc(d.first_name)} ${esc(d.last_name)}</span></div></td>
       <td>${esc(d.job_title||'—')}</td>
       <td>${esc(d.department_name||'—')}</td>
-      <td>${d.licence_expiry ? `<span class="badge ${new Date(d.licence_expiry)<new Date()?'badge-red':'badge-green'}">${fmtDate(d.licence_expiry)}</span>` : '—'}</td>
+      <td>${esc(d.category_name||d.service_type||'—')}</td>      <td>${d.licence_expiry ? `<span class="badge ${new Date(d.licence_expiry)<new Date()?'badge-red':'badge-green'}">${fmtDate(d.licence_expiry)}</span>` : '—'}</td>
       <td>${d.health_expiry ? `<span class="badge ${new Date(d.health_expiry)<new Date()?'badge-red':'badge-green'}">${fmtDate(d.health_expiry)}</span>` : '—'}</td>
       <td>${esc(d.phone||'—')}</td>
       <td class="cell-actions"><button class="btn btn-secondary btn-sm" onclick="openDriverForm(${d.id})">Edit</button></td>
@@ -1107,6 +1107,10 @@ async function openDriverForm(id) {
       </div>
       <div class="form-row-3">
         <div class="form-group"><label>Department</label><select name="department_id">${selectOpts(LOOKUPS.departments,'id','name',d.department_id)}</select></div>
+        <div class="form-group"><label>Category</label><select name="category_id">${selectOpts(LOOKUPS.driver_categories||[],'id','name',d.category_id,'Select...')}</select></div>
+        <div class="form-group"><label>Service Type</label><select name="service_type"><option value="">Select...</option>${(LOOKUPS.service_types||[]).map(s=>'<option value="'+esc(s.name)+'"'+(d.service_type===s.name?' selected':'')+'>'+esc(s.name)+'</option>').join('')}</select></div>
+      </div>
+      <div class="form-row-3">
         <div class="form-group"><label>Hire Date</label><input name="hire_date" type="date" value="${d.hire_date ? d.hire_date.slice(0,10) : ''}"></div>
         <div class="form-group"><label>Hourly Wage</label><input name="hourly_wage" type="number" step="0.01" value="${d.hourly_wage||0}"></div>
       </div>
@@ -1119,7 +1123,11 @@ async function openDriverForm(id) {
         <div class="form-group"><label>Health Ref</label><input name="health_ref" value="${esc(d.health_ref||'')}"></div>
         <div class="form-group"><label>Health Expiry</label><input name="health_expiry" type="date" value="${d.health_expiry ? d.health_expiry.slice(0,10) : ''}"></div>
       </div>
-      <div class="form-group"><label>Driver Photo URL</label><input name="photo_url" value="${esc(d.photo_url||'')}" placeholder="Paste image URL (e.g. Imgur, Google Drive public link)"></div>
+      <div class="form-group"><label>Driver Photo</label>
+        <div style="display:flex;align-items:center;gap:12px">
+          ${d.photo_url ? '<img src="'+d.photo_url+'" style="width:64px;height:64px;object-fit:cover;border-radius:50%;border:2px solid var(--border)">' : '<div style="width:64px;height:64px;border-radius:50%;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:1.5rem">👤</div>'}
+          <div><input type="file" accept="image/*" onchange="uploadPhoto(\'drivers\',${id||0},this)" style="font-size:0.85rem"><div style="font-size:0.72rem;color:var(--text-3);margin-top:4px">Max 2MB. Save driver first, then upload.</div></div>
+        </div></div>
       <div class="form-group"><label>Notes</label><textarea name="notes">${esc(d.notes||'')}</textarea></div>
     </form>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -1130,7 +1138,7 @@ async function saveDriver(id) {
   const fd = new FormData(document.getElementById('driver-form'));
   const data = {};
   for (const [k,v] of fd.entries()) {
-    if (k === 'department_id') data[k] = v ? parseInt(v) : null;
+    if (k === 'department_id' || k === 'category_id') data[k] = v ? parseInt(v) : null;
     else if (k === 'hourly_wage') data[k] = v ? parseFloat(v) : 0;
     else data[k] = v || null;
   }
@@ -1750,9 +1758,9 @@ async function loadReport(type, btn) {
   try { data = await get('/reports/' + type); } catch(err) { el.innerHTML = '<div class="empty-state"><p>Error loading report: ' + esc(err.message) + '</p></div>'; return; }
   
   if (type === 'vehicles') {
-    el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Reg</th><th>Unit</th><th>Make/Model</th><th>Dept</th><th>Fuel Cost</th><th>Maint Cost</th><th>Insurance</th><th>Total</th></tr></thead><tbody>${
+    el.innerHTML = '<div style="padding:8px 20px;border-bottom:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap"><select id="rv-dept" onchange="loadReport(\'vehicles\')" style="padding:8px 28px 8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-2);font-size:0.85rem;appearance:none"><option value="">All Departments</option>' + (LOOKUPS.departments||[]).map(function(d){return '<option value="'+esc(d.name)+'">'+esc(d.name)+'</option>';}).join('') + '</select></div>' + `<div class="table-wrap"><table><thead><tr><th>Reg</th><th>Unit</th><th>Make/Model</th><th>Dept</th><th>Fuel Cost</th><th>Maint Cost</th><th>Insurance</th><th>Total</th></tr></thead><tbody>${
       data.map(v => `<tr>
-        <td class="cell-primary"><div style="display:flex;align-items:center;gap:8px">${v.photo_url ? '<img src="'+esc(v.photo_url)+'" style="width:36px;height:36px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border)" onerror="this.style.display=\'none\'">' : ''}<span class="cell-mono">'+esc(v.registration)+'</span></div></td>
+        <td class="cell-primary"><div style="display:flex;align-items:center;gap:8px">${v.photo_url ? '<img src="'+v.photo_url+'" style="width:36px;height:36px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border)" onerror="this.style.display=\'none\'">' : '<div style="width:36px;height:36px;border-radius:var(--radius-sm);background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:0.9rem;flex-shrink:0">🚗</div>'}<span class="cell-mono">${esc(v.registration)}</span></div></td>
         <td class="cell-mono">${esc(v.unit_number)}</td>
         <td>${esc(v.make||'')} ${esc(v.model||'')}</td>
         <td>${esc(v.department||'—')}</td>
@@ -1999,6 +2007,29 @@ async function renderSettings() {
         </div>`).join('')}
     </div></div>`;
 }
+
+// Settings lookup management
+async function addLookup(type) {
+  var input = document.getElementById('new-'+type);
+  if (!input || !input.value.trim()) return;
+  try {
+    await post('/'+type, {name: input.value.trim()});
+    toast('Added');
+    input.value = '';
+    renderSettings();
+    LOOKUPS = await get('/lookups');
+  } catch(e) { toast(e.message, 'error'); }
+}
+async function deleteLookup(type, id) {
+  if (!confirm('Delete this item?')) return;
+  try {
+    await del('/'+type+'/'+id);
+    toast('Deleted');
+    renderSettings();
+    LOOKUPS = await get('/lookups');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
 async function saveSetting(key) {
   const val = document.getElementById(`setting-${key}`).value;
   try { await put(`/settings/${key}`, { value: val }); toast('Setting updated'); } catch(e) { toast(e.message, 'error'); }
