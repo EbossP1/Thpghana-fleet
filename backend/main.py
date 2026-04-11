@@ -625,6 +625,7 @@ def report_fuel(date_from:Optional[str]=None,date_to:Optional[str]=None,
     sql="""SELECT ft.transaction_date,v.unit_number,v.registration,
            d.first_name||' '||d.last_name AS driver,vn.name AS station,
            ft.location,ft2.name AS fuel_type,ft.litres,ft.cost_per_litre,ft.total_cost,
+           ft.odometer_start,ft.odometer_end,
            ft.reference,p.name AS project,fc.card_number
            FROM fuel_transactions ft JOIN vehicles v ON v.id=ft.vehicle_id
            LEFT JOIN drivers d ON d.id=ft.driver_id LEFT JOIN vendors vn ON vn.id=ft.vendor_id
@@ -749,10 +750,10 @@ def card_statement(cid: int, user=Depends(get_current_user)):
 
 @app.get("/api/reports/fuel-cards")
 def report_fuel_cards(user=Depends(get_current_user)):
-    cards = query("""SELECT fc.*, v.unit_number, v.registration,
+    cards = query("""SELECT fc.*, v.unit_number, v.registration, v.make, v.model,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='topup'),0) AS total_topups,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'),0) AS total_expenses,
-                     COALESCE((SELECT MAX(transaction_date) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'),'') AS last_used
+                     (SELECT MAX(transaction_date) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase') AS last_used
                      FROM fuel_cards fc LEFT JOIN vehicles v ON v.id=fc.vehicle_id
                      WHERE fc.is_active=true ORDER BY fc.card_number""")
     total_balance = sum(float(c.get("current_balance") or 0) for c in cards)
