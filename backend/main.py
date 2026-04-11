@@ -379,12 +379,26 @@ def create_fuel_tx(data:FuelTxCreate,user=Depends(get_current_user)):
     if data.odometer_end and data.vehicle_id:
         execute("UPDATE vehicles SET current_odometer=%s,updated_at=NOW() WHERE id=%s AND current_odometer<%s",
                 (data.odometer_end,data.vehicle_id,data.odometer_end))
-    # Deduct from card balance if purchase
-    if data.fuel_card_id and data.transaction_type == "purchase" and data.total_cost:
+    # ── Card balance logic (accounting rules) ──
+    if data.transaction_type == "purchase" and data.fuel_card_id and data.total_cost:
+        # PURCHASE: Deduct from card → this IS an expense
         execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
                 (data.total_cost, data.fuel_card_id))
         card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (data.fuel_card_id,))
         if card: _check_card_balance(card)
+    elif data.transaction_type == "transfer" and data.fuel_card_id and data.transfer_to_card_id and data.total_cost:
+        # TRANSFER: Move cash from Card A to Card B → NOT an expense, just rebalancing
+        # Deduct from source card
+        execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
+                (data.total_cost, data.fuel_card_id))
+        # Add to destination card
+        execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+                (data.total_cost, data.transfer_to_card_id))
+        # Check both cards for low balance
+        src = query_one("SELECT * FROM fuel_cards WHERE id=%s", (data.fuel_card_id,))
+        if src: _check_card_balance(src)
+        dst = query_one("SELECT * FROM fuel_cards WHERE id=%s", (data.transfer_to_card_id,))
+        if dst: _check_card_balance(dst)
     return {"id":row["id"],"message":"Transaction recorded"}
 
 @app.delete("/api/fuel-transactions/{tid}")
@@ -583,6 +597,30 @@ def change_password(uid:int,data:PasswordChange,user=Depends(require_admin)):
     execute("UPDATE users SET password_hash=%s WHERE id=%s",(pw,uid))
     return {"message":"Password updated"}
 
+
+
+# ── Photo Upload (base64) ─────────────────────────────────────────────────────
+from fastapi import File, UploadFile
+import base64
+
+@app.post("/api/vehicles/{vid}/photo")
+async def upload_vehicle_photo(vid:int, file:UploadFile=File(...), user=Depends(get_current_user)):
+    contents = await file.read()
+    if len(contents) > 2_000_000:
+        raise HTTPException(400, "Photo must be under 2MB")
+    b64 = f"data:{file.content_type};base64," + base64.b64encode(contents).decode()
+    execute("UPDATE vehicles SET photo_url=%s, updated_at=NOW() WHERE id=%s", (b64, vid))
+    return {"message": "Photo uploaded", "photo_url": b64}
+
+@app.post("/api/drivers/{did}/photo")
+async def upload_driver_photo(did:int, file:UploadFile=File(...), user=Depends(get_current_user)):
+    contents = await file.read()
+    if len(contents) > 2_000_000:
+        raise HTTPException(400, "Photo must be under 2MB")
+    b64 = f"data:{file.content_type};base64," + base64.b64encode(contents).decode()
+    execute("UPDATE drivers SET photo_url=%s, updated_at=NOW() WHERE id=%s", (b64, did))
+    return {"message": "Photo uploaded", "photo_url": b64}
+
 # ── Lookups ───────────────────────────────────────────────────────────────────
 @app.get("/api/lookups")
 def get_lookups(user=Depends(get_current_user)):
@@ -637,7 +675,7 @@ def report_fuel(date_from:Optional[str]=None,date_to:Optional[str]=None,
     if date_to: sql+=" AND ft.transaction_date<=%s"; params.append(date_to)
     if vehicle_id: sql+=" AND ft.vehicle_id=%s"; params.append(vehicle_id)
     if project_id: sql+=" AND ft.project_id=%s"; params.append(project_id)
-    return query(sql+" ORDER BY v.unit_number,ft.transaction_date",params)
+    return query(sql+" ORDER BY v.registration,v.unit_number,ft.transaction_date",params)
 
 @app.get("/api/reports/personnel")
 def report_personnel(user=Depends(get_current_user)):
@@ -753,6 +791,8 @@ def report_fuel_cards(user=Depends(get_current_user)):
     cards = query("""SELECT fc.*, v.unit_number, v.registration, v.make, v.model,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='topup'),0) AS total_topups,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'),0) AS total_expenses,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='transfer'),0) AS total_transfers_out,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE transfer_to_card_id=fc.id AND transaction_type='transfer'),0) AS total_transfers_in,
                      (SELECT MAX(transaction_date) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase') AS last_used
                      FROM fuel_cards fc LEFT JOIN vehicles v ON v.id=fc.vehicle_id
                      WHERE fc.is_active=true ORDER BY fc.card_number""")
