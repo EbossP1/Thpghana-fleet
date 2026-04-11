@@ -72,7 +72,7 @@ class DriverCreate(BaseModel):
     department_id:Optional[int]=None; licence_number:Optional[str]=None
     licence_expiry:Optional[str]=None; licence_state:Optional[str]=None
     health_ref:Optional[str]=None; health_expiry:Optional[str]=None
-    hire_date:Optional[str]=None; hourly_wage:Optional[float]=0; notes:Optional[str]=None; photo_url:Optional[str]=None
+    hire_date:Optional[str]=None; hourly_wage:Optional[float]=0; category_id:Optional[int]=None; service_type:Optional[str]=None; notes:Optional[str]=None; photo_url:Optional[str]=None
 
 class FuelCardCreate(BaseModel):
     card_number:str; card_type:Optional[str]="GO CARD"
@@ -284,11 +284,11 @@ def get_drivers(search:Optional[str]=None,user=Depends(get_current_user)):
 @app.post("/api/drivers",status_code=201)
 def create_driver(data:DriverCreate,user=Depends(get_current_user)):
     row=execute("""INSERT INTO drivers (employee_number,first_name,last_name,job_title,email,phone,
-        department_id,licence_number,licence_expiry,licence_state,health_ref,health_expiry,hire_date,hourly_wage,notes,photo_url)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        department_id,licence_number,licence_expiry,licence_state,health_ref,health_expiry,hire_date,hourly_wage,category_id,service_type,notes,photo_url)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (data.employee_number,data.first_name,data.last_name,data.job_title,data.email,data.phone,
          data.department_id,data.licence_number,data.licence_expiry,data.licence_state,
-         data.health_ref,data.health_expiry,data.hire_date,data.hourly_wage,data.notes,data.photo_url))
+         data.health_ref,data.health_expiry,data.hire_date,data.hourly_wage,data.category_id,data.service_type,data.notes,data.photo_url))
     _refresh_driver_reminders(row["id"])
     return {"id":row["id"],"message":"Driver created"}
 
@@ -296,10 +296,10 @@ def create_driver(data:DriverCreate,user=Depends(get_current_user)):
 def update_driver(did:int,data:DriverCreate,user=Depends(get_current_user)):
     execute("""UPDATE drivers SET employee_number=%s,first_name=%s,last_name=%s,job_title=%s,email=%s,phone=%s,
         department_id=%s,licence_number=%s,licence_expiry=%s,licence_state=%s,health_ref=%s,health_expiry=%s,
-        hire_date=%s,hourly_wage=%s,notes=%s,photo_url=%s,updated_at=NOW() WHERE id=%s""",
+        hire_date=%s,hourly_wage=%s,category_id=%s,service_type=%s,notes=%s,photo_url=%s,updated_at=NOW() WHERE id=%s""",
         (data.employee_number,data.first_name,data.last_name,data.job_title,data.email,data.phone,
          data.department_id,data.licence_number,data.licence_expiry,data.licence_state,
-         data.health_ref,data.health_expiry,data.hire_date,data.hourly_wage,data.notes,data.photo_url,did))
+         data.health_ref,data.health_expiry,data.hire_date,data.hourly_wage,data.category_id,data.service_type,data.notes,data.photo_url,did))
     _refresh_driver_reminders(did)
     return {"message":"Updated"}
 
@@ -634,7 +634,9 @@ def get_lookups(user=Depends(get_current_user)):
         "projects": query("SELECT id,code,name FROM projects WHERE is_active=true ORDER BY name"),
         "fuel_cards": query("SELECT fc.id,fc.card_number,fc.card_type,v.unit_number FROM fuel_cards fc LEFT JOIN vehicles v ON v.id=fc.vehicle_id WHERE fc.is_active=true ORDER BY fc.card_number"),
         "drivers": query("SELECT id,employee_number,first_name,last_name FROM drivers WHERE is_active=true ORDER BY last_name"),
-        "vehicles": query("SELECT id,unit_number,registration,make,model FROM vehicles WHERE is_active=true ORDER BY unit_number"),
+        "vehicles": query("SELECT id,unit_number,registration,make,model,photo_url FROM vehicles WHERE is_active=true ORDER BY unit_number"),
+        "driver_categories": query("SELECT * FROM driver_categories ORDER BY name"),
+        "service_types": query("SELECT * FROM service_types ORDER BY name"),
     }
 
 # ── Reports ───────────────────────────────────────────────────────────────────
@@ -729,6 +731,39 @@ class SettingUpdate(BaseModel): value: str
 def update_setting(key: str, data: SettingUpdate, user=Depends(get_current_user)):
     execute("UPDATE reminder_settings SET setting_value=%s, updated_at=NOW() WHERE setting_key=%s", (data.value, key))
     return {"message": "Updated"}
+
+
+# ── Lookup Management (Settings) ──────────────────────────────────────────────
+class LookupCreate(BaseModel):
+    name: str
+
+@app.get("/api/driver-categories")
+def get_driver_categories(user=Depends(get_current_user)):
+    return query("SELECT * FROM driver_categories ORDER BY name")
+
+@app.post("/api/driver-categories", status_code=201)
+def create_driver_category(data: LookupCreate, user=Depends(get_current_user)):
+    row = execute("INSERT INTO driver_categories (name) VALUES (%s) RETURNING id", (data.name,))
+    return {"id": row["id"], "message": "Created"}
+
+@app.delete("/api/driver-categories/{cid}")
+def delete_driver_category(cid: int, user=Depends(get_current_user)):
+    execute("DELETE FROM driver_categories WHERE id=%s", (cid,))
+    return {"message": "Deleted"}
+
+@app.get("/api/service-types")
+def get_service_types(user=Depends(get_current_user)):
+    return query("SELECT * FROM service_types ORDER BY name")
+
+@app.post("/api/service-types", status_code=201)
+def create_service_type(data: LookupCreate, user=Depends(get_current_user)):
+    row = execute("INSERT INTO service_types (name) VALUES (%s) RETURNING id", (data.name,))
+    return {"id": row["id"], "message": "Created"}
+
+@app.delete("/api/service-types/{sid}")
+def delete_service_type(sid: int, user=Depends(get_current_user)):
+    execute("DELETE FROM service_types WHERE id=%s", (sid,))
+    return {"message": "Deleted"}
 
 # ── Fuel Card Balance ─────────────────────────────────────────────────────────
 class CardTopup(BaseModel):
