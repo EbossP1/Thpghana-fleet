@@ -732,6 +732,7 @@ function closeModal() { document.getElementById('modal-overlay').classList.remov
 document.getElementById('modal-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
+function vOpt(v){return (v.registration||v.unit_number) + ' \u2014 ' + (v.unit_number||'');}
 const esc = s => s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fmt = (n, dec = 2) => n == null ? '—' : Number(n).toLocaleString('en-GH', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -1353,7 +1354,7 @@ async function loadFuelTx() {
   const txs = await get(`/fuel-transactions?${params}`);
   const el = document.getElementById('ftx-table');
   if (!txs.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">⛽</div><p>No transactions found</p></div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Date</th><th>Type</th><th>Vehicle</th><th>Driver</th><th>Station</th><th>Litres</th><th>Cost/L</th><th>Total</th><th>Odometer</th><th>Card</th><th></th></tr></thead><tbody>${
+  el.innerHTML = `<table><thead><tr><th>Date</th><th>Type</th><th>Vehicle</th><th>Driver</th><th>Station</th><th>Litres</th><th>Cost/L</th><th>Total</th><th>Odometer</th><th>Card</th><th style="width:120px"></th></tr></thead><tbody>${
     txs.map(t => `<tr>
       <td>${fmtDate(t.transaction_date)}</td>
       <td><span class="badge ${t.transaction_type==='purchase'?'badge-blue':t.transaction_type==='topup'?'badge-green':'badge-yellow'}">${t.transaction_type}</span></td>
@@ -1863,7 +1864,7 @@ async function loadReport(type, btn) {
     el.innerHTML = rhtml;
     return;
   } else if (type === 'personnel') {
-    el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Emp #</th><th>Name</th><th>Title</th><th>Dept</th><th>Trips</th><th>Total KM</th><th>Fuel Entries</th><th>Fuel Cost</th></tr></thead><tbody>${
+    el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Emp #</th><th>Name</th><th>Title</th><th>Dept</th><th>Phone</th><th>Licence Exp</th><th>Health Exp</th><th>Trips</th><th>Total KM</th></tr></thead><tbody>${
       data.map(d => `<tr>
         <td class="cell-mono">${esc(d.employee_number||'—')}</td>
         <td class="cell-primary"><div style="display:flex;align-items:center;gap:8px">${d.photo_url?'<img src="'+esc(d.photo_url)+'" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:1px solid var(--border)" onerror="this.style.display=\'none\'">':''}<span>${esc(d.first_name)} ${esc(d.last_name)}</span></div></td>
