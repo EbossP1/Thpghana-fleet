@@ -1365,7 +1365,7 @@ async function loadFuelTx() {
       <td class="cell-mono">GH₵${fmt(t.total_cost)}</td>
       <td class="cell-mono" style="font-size:0.78rem">${t.odometer_end?t.odometer_end.toLocaleString():''}</td>
       <td class="cell-mono" style="font-size:0.78rem">${esc(t.card_number||'')}</td>
-      <td class="cell-actions" style="white-space:nowrap"><button class="btn btn-secondary btn-sm" onclick="openFuelTxForm(${t.id})" title="Edit" style="padding:4px 8px">✎</button><button class="btn btn-danger btn-sm" onclick="deleteFuelTx(${t.id})" title="Delete" style="padding:4px 8px">✕</button></td>
+      <td class="cell-actions" style="white-space:nowrap"><button class="btn btn-secondary btn-sm" onclick="openFuelTxForm(${t.id})" title="Edit" style="padding:5px 10px;font-size:0.78rem">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteFuelTx(${t.id})" title="Delete" style="padding:5px 10px;font-size:0.78rem">Del</button></td>
     </tr>`).join('')}</tbody></table>`;
 }
 async function deleteFuelTx(id) { if (confirm('Delete this transaction?')) { await del(`/fuel-transactions/${id}`); toast('Deleted'); loadFuelTx(); } }
@@ -1395,7 +1395,7 @@ async function openFuelTxForm(editId) {
         <div class="form-group" id="ftx-fuel-group"><label>Fuel Type</label><select name="fuel_type_id">${selectOpts(LOOKUPS.fuel_types,'id','name',pf.fuel_type_id)}</select></div>
       </div>
       <div class="form-row-3">
-        <div class="form-group" id="ftx-station-group"><label>Station</label><select name="vendor_id">${selectOpts((LOOKUPS.vendors||[]).filter(v=>v.category==='fuel_station'),'id','name')}</select></div>
+        <div class="form-group" id="ftx-station-group"><label>Station</label><select name="vendor_id">${selectOpts(LOOKUPS.vendors||[],'id','name')}</select></div>
         <div class="form-group"><label>Location</label><input name="location" value="${pf.location||''}" placeholder="e.g. Greater Accra"></div>
         <div class="form-group" id="ftx-project-group"><label>Project</label><select name="project_id">${selectOpts(LOOKUPS.projects,'id','name',pf.project_id)}</select></div>
       </div>
@@ -1476,7 +1476,7 @@ async function openMaintenanceForm(id) {
       </div>
       <div class="form-group"><label>Description *</label><textarea name="description" required>${esc(r.description||'')}</textarea></div>
       <div class="form-row">
-        <div class="form-group"><label>Vendor</label><select name="vendor_id">${selectOpts((LOOKUPS.vendors||[]).filter(v=>v.category==='workshop'),'id','name',r.vendor_id)}</select></div>
+        <div class="form-group"><label>Vendor</label><select name="vendor_id">${selectOpts(LOOKUPS.vendors||[],'id','name',r.vendor_id)}</select></div>
         <div class="form-group" id="ftx-project-group"><label>Project</label><select name="project_id">${selectOpts(LOOKUPS.projects,'id','name',r.project_id)}</select></div>
       </div>
       <div class="form-row-3">
@@ -1540,7 +1540,7 @@ async function openInsuranceForm() {
         <div class="form-group"><label>Cost (GH₵)</label><input name="cost" type="number" step="0.01"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Vendor</label><select name="vendor_id">${selectOpts((LOOKUPS.vendors||[]).filter(v=>v.category==='insurer'),'id','name')}</select></div>
+        <div class="form-group"><label>Vendor</label><select name="vendor_id">${selectOpts(LOOKUPS.vendors||[],'id','name')}</select></div>
         <div class="form-group" id="ftx-project-group"><label>Project</label><select name="project_id">${selectOpts(LOOKUPS.projects,'id','name')}</select></div>
       </div>
       <div class="form-group"><label>Notes</label><textarea name="notes"></textarea></div>
