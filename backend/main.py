@@ -683,11 +683,9 @@ def report_fuel(date_from:Optional[str]=None,date_to:Optional[str]=None,
 def report_personnel(user=Depends(get_current_user)):
     return query("""
         SELECT d.employee_number,d.first_name,d.last_name,d.job_title,dep.name AS department,
-               d.licence_expiry,d.health_expiry,
+               d.phone,d.licence_expiry,d.health_expiry,
                COUNT(DISTINCT t.id) AS total_trips,
-               COALESCE(SUM(t.distance),0) AS total_km,
-               COUNT(DISTINCT ft.id) AS fuel_entries,
-               COALESCE(SUM(ft.total_cost),0) AS fuel_cost
+               COALESCE(SUM(t.distance),0) AS total_km
         FROM drivers d LEFT JOIN departments dep ON dep.id=d.department_id
         LEFT JOIN trips t ON t.driver_id=d.id
         LEFT JOIN fuel_transactions ft ON ft.driver_id=d.id AND ft.transaction_type='purchase'
