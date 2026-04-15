@@ -160,6 +160,13 @@ body{background:#fff!important;color:#000!important;-webkit-print-color-adjust:e
 .print-header .print-sub{font-size:10pt;color:#333!important}
 .print-header .print-date{font-size:8pt;color:#666!important;margin-top:4px}
 .print-footer{display:block!important;text-align:center;padding:8px 0;margin-top:20px;font-size:7pt;color:#999!important;border-top:1px solid #ccc}
+body.print-modal #app-shell .main-content{display:none!important}
+body.print-modal .modal-overlay{position:static!important;background:none!important;backdrop-filter:none!important;opacity:1!important;pointer-events:auto!important;padding:0!important}
+body.print-modal .modal{width:100%!important;max-width:100%!important;box-shadow:none!important;border:none!important;border-radius:0!important}
+body.print-modal .modal-header{border-bottom:2px solid #1B5E2E!important;padding:12px 0!important}
+body.print-modal .modal-header h3{color:#1B5E2E!important;font-size:14pt!important}
+body.print-modal .modal-close,.print-modal .modal-footer,.print-modal .toolbar{display:none!important}
+body.print-modal .modal-body{max-height:none!important;overflow:visible!important;padding:12px 0!important}
 }
 </style>
 </head>
@@ -243,7 +250,7 @@ function sopts(items,vk,lk,sel,ph){var h='<option value="">'+(ph||'Select...')+'
 function vLabel(v){return esc(v.registration||v.unit_number)+' \u2014 '+esc(v.unit_number||'');}
 
 function exportCSV(fn){var t=document.querySelector('#mc table');if(!t){toast('No data','error');return;}var rows=[].slice.call(t.querySelectorAll('tr'));var csv=rows.map(function(r){var cells=[].slice.call(r.querySelectorAll('th,td'));return cells.slice(0,Math.max(1,cells.length-1)).map(function(c){return '"'+c.textContent.trim().replace(/"/g,'""')+'"';}).join(',');}).join('\n');var blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fn||'export.csv';a.click();toast('Exported');}
-function printPage(){var pd=document.getElementById('print-date');if(pd)pd.textContent='Printed: '+new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'});setTimeout(function(){window.print();},150);}
+function printPage(){var pd=document.getElementById('print-date');if(pd)pd.textContent='Printed: '+new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'});var mo=document.getElementById('modal-overlay');if(mo&&mo.classList.contains('show')){document.body.classList.add('print-modal');setTimeout(function(){window.print();setTimeout(function(){document.body.classList.remove('print-modal');},500);},150);}else{setTimeout(function(){window.print();},150);}}
 
 // Photo upload
 async function uploadPhoto(type,id,input){if(!id||id==='null'||!input.files[0]){toast('Save the record first, then upload photo','error');return;}var file=input.files[0];if(file.size>2000000){toast('Photo must be under 2MB','error');return;}var fd=new FormData();fd.append('file',file);try{var h={};if(TOKEN)h['Authorization']='Bearer '+TOKEN;var res=await fetch(API+'/'+type+'/'+id+'/photo',{method:'POST',headers:h,body:fd});if(!res.ok)throw new Error('Upload failed');toast('Photo uploaded');navigate(CUR_PAGE);}catch(e){toast(e.message,'error');}}
@@ -448,7 +455,23 @@ async function openFuelTxForm(editId){
   h+='<div class="fg"><label id="ftx-ref-lbl">'+(pf.transaction_type==='transfer'?'PURPOSE OF TRANSFER':'REFERENCE / NOTES')+'</label><input name="reference" value="'+esc(pf.reference||'')+'"></div></form>';
   openModal(isEdit?'Edit Transaction':'Record Fuel Transaction',h,'<button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" onclick="saveFuelTx('+(editId||'null')+')">'+(isEdit?'Update':'Save')+'</button>',true);
 }
-async function saveFuelTx(editId){var fd=new FormData(document.getElementById('ftf'));var d={};for(var p of fd.entries()){var k=p[0],v=p[1];if(['vehicle_id','driver_id','fuel_card_id','transfer_to_card_id','fuel_type_id','vendor_id','project_id','odometer_start','odometer_end'].indexOf(k)>=0)d[k]=v?parseInt(v):null;else if(['litres','cost_per_litre','total_cost'].indexOf(k)>=0)d[k]=v?parseFloat(v):null;else d[k]=v||null;}try{if(editId)await del('/fuel-transactions/'+editId);await post('/fuel-transactions',d);toast(editId?'Updated':'Recorded');closeModal();loadFuelTx();}catch(e){toast(e.message,'error');}}
+async function saveFuelTx(editId){var fd=new FormData(document.getElementById('ftf'));var d={};for(var p of fd.entries()){var k=p[0],v=p[1];if(['vehicle_id','driver_id','fuel_card_id','transfer_to_card_id','fuel_type_id','vendor_id','project_id','odometer_start','odometer_end'].indexOf(k)>=0)d[k]=v?parseInt(v):null;else if(['litres','cost_per_litre','total_cost'].indexOf(k)>=0)d[k]=v?parseFloat(v):null;else d[k]=v||null;}try{if(editId){
+  // Get the old transaction to reverse its balance effect
+  var oldTxs=await get('/fuel-transactions?limit=500');var oldTx=oldTxs.find(function(t){return t.id===editId;});
+  if(oldTx&&oldTx.fuel_card_id&&oldTx.total_cost){
+    var oldAmt=Number(oldTx.total_cost);
+    // Reverse: purchases deducted, so add back; topups added, so subtract back
+    var reverseAmt=oldTx.transaction_type==='purchase'?oldAmt:oldTx.transaction_type==='topup'?-oldAmt:oldAmt;
+    if(Math.abs(reverseAmt)>=0.01){
+      await post('/fuel-cards/'+oldTx.fuel_card_id+'/topup',{amount:reverseAmt,reference:'Edit adjustment (tx #'+editId+')',topup_date:new Date().toISOString().slice(0,10)});
+    }
+    // Also reverse transfer destination if applicable
+    if(oldTx.transaction_type==='transfer'&&oldTx.transfer_to_card_id){
+      await post('/fuel-cards/'+oldTx.transfer_to_card_id+'/topup',{amount:-oldAmt,reference:'Edit adjustment (tx #'+editId+')',topup_date:new Date().toISOString().slice(0,10)});
+    }
+  }
+  await del('/fuel-transactions/'+editId);
+}await post('/fuel-transactions',d);toast(editId?'Updated':'Recorded');closeModal();loadFuelTx();}catch(e){toast(e.message,'error');}}
 
 // ======= MAINTENANCE =======
 async function renderMaint(){var mc=document.getElementById('mc');var vh='';(LK.vehicles||[]).forEach(function(v){vh+='<option value="'+v.id+'">'+esc(v.registration)+'</option>';});mc.innerHTML='<div class="page-header"><div><h2>Service Records</h2></div><div class="header-actions"><button class="btn btn-print btn-sm" onclick="printPage()">&#128424;</button><button class="btn btn-export btn-sm" onclick="exportCSV(\'maintenance.csv\')">&#128229;</button><button class="btn btn-p" onclick="openMaintForm()">+ Add Record</button></div></div><div class="toolbar"><select id="mt-v" onchange="loadMaint()"><option value="">All Vehicles</option>'+vh+'</select></div><div class="card"><div class="card-body no-pad"><div class="table-wrap" id="mt-tbl"></div></div></div>';loadMaint();}
