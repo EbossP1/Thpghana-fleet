@@ -345,7 +345,7 @@ async function deleteTrip(id){if(confirm('Delete?')){await del('/trips/'+id);toa
 
 // ======= FUEL CARDS =======
 async function renderFuelCards(){var cards=await get('/fuel-cards');var mc=document.getElementById('mc');var h='<div class="page-header"><div><h2>Fuel Cards (GoCard)</h2></div><div class="header-actions"><button class="btn btn-p" onclick="openFuelCardForm()">+ Add Card</button></div></div><div class="card"><div class="card-body no-pad"><table><thead><tr><th>Card #</th><th>Type</th><th>Vehicle</th><th>Driver</th><th>Balance</th><th></th></tr></thead><tbody>';
-if(cards.length){cards.forEach(function(c){var bal=Number(c.current_balance||0);h+='<tr><td class="cp cm">'+esc(c.card_number)+'</td><td>'+esc(c.card_type||'')+'</td><td>'+(c.registration?esc(c.registration)+' ('+esc(c.unit_number)+')':c.unit_number?esc(c.unit_number):'\u2014')+'</td><td>'+esc(c.driver_name||'\u2014')+'</td><td class="cm"><span class="badge '+(bal<=0?'br':bal<=500?'by':'bg')+'">GH\u20B5'+fmt(bal)+'</span></td><td class="ca"><button class="btn btn-s btn-sm" onclick="openTopup('+c.id+',\''+esc(c.card_number)+'\')">Top Up</button><button class="btn btn-s btn-sm" onclick="viewStatement('+c.id+')">Statement</button><button class="btn btn-s btn-sm" onclick="openFuelCardForm('+c.id+')">Edit</button></td></tr>';});}else h+='<tr><td colspan="6"><div class="empty-state"><p>No cards</p></div></td></tr>';
+if(cards.length){cards.forEach(function(c){var bal=Number(c.current_balance||0);h+='<tr><td class="cp cm">'+esc(c.card_number)+'</td><td>'+esc(c.card_type||'')+'</td><td>'+(c.registration?esc(c.registration)+' ('+esc(c.unit_number)+')':c.unit_number?esc(c.unit_number):'\u2014')+'</td><td>'+esc(c.driver_name||'\u2014')+'</td><td class="cm"><span class="badge '+(bal<=0?'br':bal<=500?'by':'bg')+'">GH\u20B5'+fmt(bal)+'</span></td><td class="ca"><button class="btn btn-s btn-sm" onclick="openTopup('+c.id+',\''+esc(c.card_number)+'\')">Top Up</button><button class="btn btn-s btn-sm" onclick="viewStatement('+c.id+')">Statement</button><button class="btn btn-s btn-sm" onclick="openFuelCardForm('+c.id+')">Edit</button><button class="btn btn-d btn-sm" onclick="delFuelCard('+c.id+')">Del</button></td></tr>';});}else h+='<tr><td colspan="6"><div class="empty-state"><p>No cards</p></div></td></tr>';
 h+='</tbody></table></div></div>';mc.innerHTML=h;}
 async function openFuelCardForm(id){var c={};if(id){var cs=await get('/fuel-cards');c=cs.find(function(x){return x.id===id;})||{};}
 var balSection='';
@@ -387,19 +387,41 @@ try{
 }catch(e){toast(e.message,'error');}}
 function openTopup(cid,num){openModal('Top Up \u2014 '+num,'<form id="tuf"><div class="fg"><label>Amount (GH\u20B5) *</label><input name="amount" type="number" step=".01" required></div><div class="fg"><label>Reference</label><input name="reference"></div><div class="fg"><label>Date</label><input name="topup_date" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div></form>','<button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" onclick="doTopup('+cid+')">Top Up</button>');}
 async function doTopup(cid){var fd=new FormData(document.getElementById('tuf'));var d={amount:parseFloat(fd.get('amount')),reference:fd.get('reference')||null,topup_date:fd.get('topup_date')||null};if(!d.amount||d.amount<=0){toast('Enter amount','error');return;}try{await post('/fuel-cards/'+cid+'/topup',d);toast('Topped up');closeModal();renderFuelCards();}catch(e){toast(e.message,'error');}}
-async function viewStatement(cid){var s=await get('/fuel-cards/'+cid+'/statement');var card=s.card;
-  var initBal=s.summary.balance-s.summary.topups+s.summary.expenses;
-  var h='<div class="stat-grid" style="margin-bottom:16px"><div class="stat-card sc-green"><div class="stat-label">Total Top-ups</div><div class="stat-value accent" style="font-size:1.1rem">GH\u20B5'+fmt(s.summary.topups)+'</div></div><div class="stat-card sc-red"><div class="stat-label">Total Purchases</div><div class="stat-value danger" style="font-size:1.1rem">GH\u20B5'+fmt(s.summary.expenses)+'</div></div><div class="stat-card sc-blue"><div class="stat-label">Current Balance</div><div class="stat-value blue" style="font-size:1.1rem">GH\u20B5'+fmt(s.summary.balance)+'</div></div></div>';
+async function delFuelCard(id){if(!confirm('Deactivate this fuel card? This cannot be undone.'))return;try{await del('/fuel-cards/'+id);toast('Card deactivated');renderFuelCards();LK=await get('/lookups');}catch(e){toast(e.message,'error');}}
+var STMT_CID=null;
+async function viewStatement(cid){STMT_CID=cid;var s=await get('/fuel-cards/'+cid+'/statement');var card=s.card;var allTxns=s.transactions||[];
+  // Date filter values
+  var sfEl=document.getElementById('stmt-from');var stEl=document.getElementById('stmt-to');
+  var dateFrom=sfEl?sfEl.value:'';var dateTo=stEl?stEl.value:'';
+  // Compute true opening balance by walking ALL transactions forward from initial
+  // initial_balance = current_balance - net_of_all_transactions
+  var netAll=0;allTxns.forEach(function(t){var a=Number(t.total_cost||0);if(t.transaction_type==='topup'){netAll+=a;}else{netAll-=a;}});
+  var initialBalance=Number(s.summary.balance)-netAll;
+  // Filter transactions by date range
+  var filtered=allTxns;
+  if(dateFrom||dateTo){filtered=allTxns.filter(function(t){var d=t.transaction_date?t.transaction_date.slice(0,10):'';if(dateFrom&&d<dateFrom)return false;if(dateTo&&d>dateTo)return false;return true;});}
+  // Opening balance for filtered period = initial + net of all txns BEFORE the filter start
+  var openBal=initialBalance;
+  if(dateFrom){allTxns.forEach(function(t){var d=t.transaction_date?t.transaction_date.slice(0,10):'';if(d<dateFrom){var a=Number(t.total_cost||0);if(t.transaction_type==='topup'){openBal+=a;}else{openBal-=a;}}});}
+  else{openBal=initialBalance;}
+  // Period summary
+  var pTop=0,pExp=0;filtered.forEach(function(t){var a=Number(t.total_cost||0);if(t.transaction_type==='topup'){pTop+=a;}else if(t.transaction_type==='purchase'){pExp+=a;}});
+  var closeBal=openBal+pTop-pExp;
+  // Adjust for transfers in filtered set
+  filtered.forEach(function(t){if(t.transaction_type==='transfer'){closeBal-=Number(t.total_cost||0);}});
+  // Build UI
+  var h='<div class="toolbar" style="margin-bottom:16px"><span style="font-size:.82rem;color:var(--tx2);font-weight:500">Period:</span><input type="date" id="stmt-from" value="'+dateFrom+'" onchange="viewStatement('+cid+')"><span style="color:var(--tx3);font-size:.82rem">to</span><input type="date" id="stmt-to" value="'+dateTo+'" onchange="viewStatement('+cid+')"><button class="btn btn-s btn-sm" onclick="document.getElementById(\'stmt-from\').value=\'\';document.getElementById(\'stmt-to\').value=\'\';viewStatement('+cid+')">Clear</button></div>';
+  h+='<div class="stat-grid" style="margin-bottom:16px"><div class="stat-card sc-green"><div class="stat-label">Top-ups (Period)</div><div class="stat-value accent" style="font-size:1.1rem">GH\u20B5'+fmt(pTop)+'</div></div><div class="stat-card sc-red"><div class="stat-label">Purchases (Period)</div><div class="stat-value danger" style="font-size:1.1rem">GH\u20B5'+fmt(pExp)+'</div></div><div class="stat-card sc-blue"><div class="stat-label">Current Balance</div><div class="stat-value blue" style="font-size:1.1rem">GH\u20B5'+fmt(s.summary.balance)+'</div></div></div>';
   h+='<table><thead><tr><th>Date</th><th>Type</th><th style="text-align:right">Debit (GH\u20B5)</th><th style="text-align:right">Credit (GH\u20B5)</th><th style="text-align:right">Balance (GH\u20B5)</th><th>Reference</th></tr></thead><tbody>';
-  h+='<tr style="background:var(--sf2)"><td colspan="2" style="font-weight:600;font-style:italic">Opening Balance</td><td></td><td></td><td class="cm" style="text-align:right;font-weight:700">'+fmt(initBal)+'</td><td style="color:var(--tx3);font-style:italic">Balance brought forward</td></tr>';
-  var runBal=initBal;
-  if(s.transactions.length){s.transactions.forEach(function(t){
+  h+='<tr style="background:var(--sf2)"><td colspan="2" style="font-weight:600;font-style:italic">Opening Balance</td><td></td><td></td><td class="cm" style="text-align:right;font-weight:700">'+fmt(openBal)+'</td><td style="color:var(--tx3);font-style:italic">Balance brought forward</td></tr>';
+  var runBal=openBal;
+  if(filtered.length){filtered.forEach(function(t){
     var amt=Number(t.total_cost||0);var isCredit=t.transaction_type==='topup';
     if(isCredit){runBal+=amt;}else{runBal-=amt;}
     var typeBadge=t.transaction_type==='topup'?'bg':t.transaction_type==='purchase'?'br':'by';
-    h+='<tr><td>'+fmtD(t.transaction_date)+'</td><td><span class="badge '+typeBadge+'">'+t.transaction_type+'</span></td><td class="cm" style="text-align:right">'+(isCredit?'':fmt(amt))+'</td><td class="cm" style="text-align:right;color:var(--ac)">'+(isCredit?fmt(amt):'')+'</td><td class="cm" style="text-align:right;font-weight:600">'+fmt(runBal)+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+esc(t.reference||t.vendor_name||'\u2014')+'</td></tr>';
-  });}else{h+='<tr><td colspan="6"><div class="empty-state" style="padding:20px"><p>No transactions yet</p></div></td></tr>';}
-  h+='<tr style="background:var(--sf2);border-top:2px solid var(--tx)"><td colspan="2" style="font-weight:700">Closing Balance</td><td></td><td></td><td class="cm" style="text-align:right;font-weight:700;font-size:.95rem;text-decoration:underline">'+fmt(s.summary.balance)+'</td><td></td></tr>';
+    h+='<tr><td>'+fmtD(t.transaction_date)+'</td><td><span class="badge '+typeBadge+'">'+esc(t.transaction_type)+'</span></td><td class="cm" style="text-align:right">'+(isCredit?'':fmt(amt))+'</td><td class="cm" style="text-align:right;color:var(--ac)">'+(isCredit?fmt(amt):'')+'</td><td class="cm" style="text-align:right;font-weight:600">'+fmt(runBal)+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+esc(t.reference||t.vendor_name||'\u2014')+'</td></tr>';
+  });}else{h+='<tr><td colspan="6"><div class="empty-state" style="padding:20px"><p>No transactions in this period</p></div></td></tr>';}
+  h+='<tr style="background:var(--sf2);border-top:2px solid var(--tx)"><td colspan="2" style="font-weight:700">Closing Balance</td><td></td><td></td><td class="cm" style="text-align:right;font-weight:700;font-size:.95rem;text-decoration:double underline">'+fmt(runBal)+'</td><td></td></tr>';
   h+='</tbody></table>';
   openModal('Card Statement \u2014 '+card.card_number,h,'<button class="btn btn-print btn-sm" onclick="printPage()">&#128424; Print</button><button class="btn btn-s" onclick="closeModal()">Close</button>',true);}
 
