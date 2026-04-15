@@ -343,6 +343,11 @@ def update_fuel_card(cid:int,data:FuelCardCreate,user=Depends(get_current_user))
         (data.card_number,data.vehicle_id,data.driver_id,data.notes,cid))
     return {"message":"Updated"}
 
+@app.delete("/api/fuel-cards/{cid}")
+def delete_fuel_card(cid: int, user=Depends(get_current_user)):
+    execute("UPDATE fuel_cards SET is_active=false WHERE id=%s", (cid,))
+    return {"message": "Deactivated"}
+
 # ── Fuel Transactions ─────────────────────────────────────────────────────────
 @app.get("/api/fuel-transactions")
 def get_fuel_tx(vehicle_id:Optional[int]=None,date_from:Optional[str]=None,date_to:Optional[str]=None,
