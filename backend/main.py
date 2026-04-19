@@ -343,6 +343,24 @@ def update_fuel_card(cid:int,data:FuelCardCreate,user=Depends(get_current_user))
         (data.card_number,data.vehicle_id,data.driver_id,data.notes,cid))
     return {"message":"Updated"}
 
+class BalanceAdjust(BaseModel):
+    amount: float
+ 
+@app.put("/api/fuel-cards/{cid}/adjust-balance")
+def adjust_balance(cid: int, data: BalanceAdjust, user=Depends(get_current_user)):
+    execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+            (data.amount, cid))
+    card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
+    if card:
+        _check_card_balance(card)
+    return {"message": "Balance adjusted", "new_balance": float(card.get("current_balance", 0)) if card else 0}
+ 
+# Soft-delete fuel card
+@app.delete("/api/fuel-cards/{cid}")
+def delete_fuel_card(cid: int, user=Depends(get_current_user)):
+    execute("UPDATE fuel_cards SET is_active=false WHERE id=%s", (cid,))
+    return {"message": "Deactivated"}
+
 @app.delete("/api/fuel-cards/{cid}")
 def delete_fuel_card(cid: int, user=Depends(get_current_user)):
     execute("UPDATE fuel_cards SET is_active=false WHERE id=%s", (cid,))
