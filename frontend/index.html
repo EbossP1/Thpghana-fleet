@@ -148,8 +148,18 @@ tbody tr:hover{background:var(--acd)}tbody tr:last-child td{border-bottom:none}
 
 .print-header,.print-footer{display:none}
 @media print{
-.topbar,.sidebar,.toolbar,.modal-overlay,.hamburger,.ca,.header-actions,.tabs,#theme-toggle,#btn-logout,.theme-toggle,.nav-badge,.btn,.btn-p,.btn-s,.btn-d,.btn-print,.btn-export{display:none!important}
-.main-content{margin:0!important;padding:10px 20px!important}
+body.print-modal .modal-overlay{position:static!important;background:none!important;backdrop-filter:none!important;opacity:1!important;pointer-events:auto!important;padding:0!important;display:block!important}
+body.print-modal .modal{width:100%!important;max-width:100%!important;box-shadow:none!important;border:none!important;border-radius:0!important;transform:none!important}
+body.print-modal .modal-header{border-bottom:2px solid #1B5E2E!important;padding:12px 20px!important}
+body.print-modal .modal-header h3{color:#1B5E2E!important;font-size:14pt!important}
+body.print-modal .modal-close{display:none!important}
+body.print-modal .modal-footer{display:none!important}
+body.print-modal .modal-body{max-height:none!important;overflow:visible!important;padding:12px 20px!important}
+body.print-modal .modal-body .toolbar{display:none!important}
+body.print-modal .modal-body .stat-card{border:1px solid #ccc!important}
+body.print-modal #app-shell{display:none!important}
+body:not(.print-modal) .topbar,body:not(.print-modal) .sidebar,body:not(.print-modal) .toolbar,body:not(.print-modal) .modal-overlay,body:not(.print-modal) .hamburger,body:not(.print-modal) .ca,body:not(.print-modal) .header-actions,body:not(.print-modal) .tabs,body:not(.print-modal) #theme-toggle,body:not(.print-modal) #btn-logout,body:not(.print-modal) .theme-toggle,body:not(.print-modal) .nav-badge,body:not(.print-modal) .btn{display:none!important}
+body:not(.print-modal) .main-content{margin:0!important;padding:10px 20px!important}
 body{background:#fff!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .card{border:1px solid #ccc;box-shadow:none}.stat-card{border:1px solid #ccc}
 .stat-card .stat-value,.stat-card .stat-label,.cp,.cm,td,th,h2,h3,h4,.cost-vehicle,.cost-amount,.reminder-title,.page-header h2,.page-header .subtitle{color:#000!important}
@@ -160,13 +170,6 @@ body{background:#fff!important;color:#000!important;-webkit-print-color-adjust:e
 .print-header .print-sub{font-size:10pt;color:#333!important}
 .print-header .print-date{font-size:8pt;color:#666!important;margin-top:4px}
 .print-footer{display:block!important;text-align:center;padding:8px 0;margin-top:20px;font-size:7pt;color:#999!important;border-top:1px solid #ccc}
-body.print-modal #app-shell .main-content{display:none!important}
-body.print-modal .modal-overlay{position:static!important;background:none!important;backdrop-filter:none!important;opacity:1!important;pointer-events:auto!important;padding:0!important}
-body.print-modal .modal{width:100%!important;max-width:100%!important;box-shadow:none!important;border:none!important;border-radius:0!important}
-body.print-modal .modal-header{border-bottom:2px solid #1B5E2E!important;padding:12px 0!important}
-body.print-modal .modal-header h3{color:#1B5E2E!important;font-size:14pt!important}
-body.print-modal .modal-close,.print-modal .modal-footer,.print-modal .toolbar{display:none!important}
-body.print-modal .modal-body{max-height:none!important;overflow:visible!important;padding:12px 0!important}
 }
 </style>
 </head>
@@ -456,18 +459,20 @@ async function openFuelTxForm(editId){
   openModal(isEdit?'Edit Transaction':'Record Fuel Transaction',h,'<button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" onclick="saveFuelTx('+(editId||'null')+')">'+(isEdit?'Update':'Save')+'</button>',true);
 }
 async function saveFuelTx(editId){var fd=new FormData(document.getElementById('ftf'));var d={};for(var p of fd.entries()){var k=p[0],v=p[1];if(['vehicle_id','driver_id','fuel_card_id','transfer_to_card_id','fuel_type_id','vendor_id','project_id','odometer_start','odometer_end'].indexOf(k)>=0)d[k]=v?parseInt(v):null;else if(['litres','cost_per_litre','total_cost'].indexOf(k)>=0)d[k]=v?parseFloat(v):null;else d[k]=v||null;}try{if(editId){
-  // Get the old transaction to reverse its balance effect
+  // Get old transaction to know what balance effect to reverse
   var oldTxs=await get('/fuel-transactions?limit=500');var oldTx=oldTxs.find(function(t){return t.id===editId;});
   if(oldTx&&oldTx.fuel_card_id&&oldTx.total_cost){
     var oldAmt=Number(oldTx.total_cost);
-    // Reverse: purchases deducted, so add back; topups added, so subtract back
+    // Calculate what to reverse: purchases deducted so add back, topups added so subtract
     var reverseAmt=oldTx.transaction_type==='purchase'?oldAmt:oldTx.transaction_type==='topup'?-oldAmt:oldAmt;
     if(Math.abs(reverseAmt)>=0.01){
-      await post('/fuel-cards/'+oldTx.fuel_card_id+'/topup',{amount:reverseAmt,reference:'Edit adjustment (tx #'+editId+')',topup_date:new Date().toISOString().slice(0,10)});
+      // Use silent balance adjust (no transaction log) — falls back to topup if endpoint missing
+      try{await put('/fuel-cards/'+oldTx.fuel_card_id+'/adjust-balance',{amount:reverseAmt});}
+      catch(ae){await post('/fuel-cards/'+oldTx.fuel_card_id+'/topup',{amount:reverseAmt,reference:'Edit adjustment (tx #'+editId+')',topup_date:oldTx.transaction_date?oldTx.transaction_date.slice(0,10):new Date().toISOString().slice(0,10)});}
     }
-    // Also reverse transfer destination if applicable
     if(oldTx.transaction_type==='transfer'&&oldTx.transfer_to_card_id){
-      await post('/fuel-cards/'+oldTx.transfer_to_card_id+'/topup',{amount:-oldAmt,reference:'Edit adjustment (tx #'+editId+')',topup_date:new Date().toISOString().slice(0,10)});
+      try{await put('/fuel-cards/'+oldTx.transfer_to_card_id+'/adjust-balance',{amount:-oldAmt});}
+      catch(ae){await post('/fuel-cards/'+oldTx.transfer_to_card_id+'/topup',{amount:-oldAmt,reference:'Edit adjustment (tx #'+editId+')',topup_date:oldTx.transaction_date?oldTx.transaction_date.slice(0,10):new Date().toISOString().slice(0,10)});}
     }
   }
   await del('/fuel-transactions/'+editId);
