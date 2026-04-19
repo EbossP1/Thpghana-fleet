@@ -333,8 +333,8 @@ def get_fuel_cards(user=Depends(get_current_user)):
 
 @app.post("/api/fuel-cards",status_code=201)
 def create_fuel_card(data:FuelCardCreate,user=Depends(get_current_user)):
-    row=execute("INSERT INTO fuel_cards (card_number,card_type,vehicle_id,driver_id,current_balance,notes) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-        (data.card_number,data.card_type,data.vehicle_id,data.driver_id,data.current_balance,data.notes))
+    row=execute("INSERT INTO fuel_cards (card_number,card_type,vehicle_id,driver_id,current_balance,initial_balance,notes) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        (data.card_number,data.card_type,data.vehicle_id,data.driver_id,data.current_balance,data.current_balance,data.notes))
     return {"id":row["id"],"message":"Card created"}
 
 @app.put("/api/fuel-cards/{cid}")
@@ -361,10 +361,31 @@ def delete_fuel_card(cid: int, user=Depends(get_current_user)):
     execute("UPDATE fuel_cards SET is_active=false WHERE id=%s", (cid,))
     return {"message": "Deactivated"}
 
-@app.delete("/api/fuel-cards/{cid}")
-def delete_fuel_card(cid: int, user=Depends(get_current_user)):
-    execute("UPDATE fuel_cards SET is_active=false WHERE id=%s", (cid,))
-    return {"message": "Deactivated"}
+# Recalculate balance from initial_balance + all transactions (fixes corrupted balances)
+@app.post("/api/fuel-cards/{cid}/recalculate")
+def recalculate_balance(cid: int, user=Depends(get_current_user)):
+    card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
+    if not card: raise HTTPException(404, "Card not found")
+    # Get the initial balance (stored when card was first created)
+    initial = float(card.get("initial_balance") or 0)
+    # Sum all transaction effects
+    txns = query("SELECT transaction_type, total_cost FROM fuel_transactions WHERE fuel_card_id=%s", (cid,))
+    net = 0
+    for t in txns:
+        amt = float(t.get("total_cost") or 0)
+        if t["transaction_type"] == "topup":
+            net += amt
+        elif t["transaction_type"] == "purchase":
+            net -= amt
+        elif t["transaction_type"] == "transfer":
+            net -= amt  # transfers out
+    # Also add transfers IN to this card
+    transfers_in = query("SELECT total_cost FROM fuel_transactions WHERE transfer_to_card_id=%s AND transaction_type='transfer'", (cid,))
+    for t in transfers_in:
+        net += float(t.get("total_cost") or 0)
+    new_balance = initial + net
+    execute("UPDATE fuel_cards SET current_balance=%s, updated_at=NOW() WHERE id=%s", (new_balance, cid))
+    return {"message": "Balance recalculated", "initial_balance": initial, "net_transactions": net, "new_balance": new_balance}
 
 # ── Fuel Transactions ─────────────────────────────────────────────────────────
 @app.get("/api/fuel-transactions")
@@ -426,7 +447,29 @@ def create_fuel_tx(data:FuelTxCreate,user=Depends(get_current_user)):
 
 @app.delete("/api/fuel-transactions/{tid}")
 def delete_fuel_tx(tid:int,user=Depends(get_current_user)):
-    execute("DELETE FROM fuel_transactions WHERE id=%s",(tid,)); return {"message":"Deleted"}
+    # Reverse balance effect before deleting
+    tx = query_one("SELECT * FROM fuel_transactions WHERE id=%s", (tid,))
+    if tx and tx.get("total_cost"):
+        amt = float(tx["total_cost"])
+        if tx["transaction_type"] == "purchase" and tx.get("fuel_card_id"):
+            # Purchase had deducted, so add back
+            execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+                    (amt, tx["fuel_card_id"]))
+        elif tx["transaction_type"] == "topup" and tx.get("fuel_card_id"):
+            # Topup had added, so subtract back
+            execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
+                    (amt, tx["fuel_card_id"]))
+        elif tx["transaction_type"] == "transfer":
+            if tx.get("fuel_card_id"):
+                # Transfer had deducted from source, add back
+                execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+                        (amt, tx["fuel_card_id"]))
+            if tx.get("transfer_to_card_id"):
+                # Transfer had added to dest, subtract back
+                execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
+                        (amt, tx["transfer_to_card_id"]))
+    execute("DELETE FROM fuel_transactions WHERE id=%s",(tid,))
+    return {"message":"Deleted"}
 
 # ── Trips ─────────────────────────────────────────────────────────────────────
 @app.get("/api/trips")
@@ -840,7 +883,7 @@ def card_statement(cid: int, user=Depends(get_current_user)):
                     WHERE ft.fuel_card_id=%s ORDER BY ft.transaction_date""", (cid,))
     topups = sum(float(t["total_cost"] or 0) for t in txns if t["transaction_type"] == "topup")
     expenses = sum(float(t["total_cost"] or 0) for t in txns if t["transaction_type"] == "purchase")
-    return {"card": card, "transactions": txns, "summary": {"topups": topups, "expenses": expenses, "balance": float(card.get("current_balance") or 0)}}
+    return {"card": card, "transactions": txns, "summary": {"topups": topups, "expenses": expenses, "balance": float(card.get("current_balance") or 0), "initial_balance": float(card.get("initial_balance") or 0)}}
 
 @app.get("/api/reports/fuel-cards")
 def report_fuel_cards(user=Depends(get_current_user)):
