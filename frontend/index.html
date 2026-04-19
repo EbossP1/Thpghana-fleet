@@ -262,7 +262,28 @@ async function uploadPhoto(type,id,input){if(!id||id==='null'||!input.files[0]){
 function calcFuel(){var l=parseFloat(document.getElementById('ftx-l').value)||0;var c=parseFloat(document.getElementById('ftx-c').value)||0;if(l>0&&c>0)document.getElementById('ftx-t').value=(l*c).toFixed(2);}
 
 // Transfer form toggle
-function toggleTxType(v){var hide=['ftx-veh','ftx-fuel','ftx-station','ftx-litres','ftx-cpl','ftx-odo','ftx-driver','ftx-project','ftx-invoice','ftx-purpose'];var show=v==='transfer';document.getElementById('ftx-transfer').style.display=show?'block':'none';hide.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display=show?'none':'';});var lbl=document.getElementById('ftx-total-lbl');if(lbl)lbl.textContent=show?'TRANSFER AMOUNT (GH\u20B5)':'TOTAL COST (GH\u20B5) \u21BB';var ref=document.getElementById('ftx-ref-lbl');if(ref)ref.textContent=show?'PURPOSE OF TRANSFER':'REFERENCE / NOTES';}
+function toggleTxType(v){
+  var isPurchase=v==='purchase';var isTopup=v==='topup';var isTransfer=v==='transfer';
+  // Fields only for purchase
+  var purchaseOnly=['ftx-veh','ftx-fuel','ftx-litres','ftx-odo','ftx-invoice'];
+  purchaseOnly.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display=isPurchase?'':'none';});
+  // Transfer-to card field
+  var trEl=document.getElementById('ftx-transfer');if(trEl)trEl.style.display=isTransfer?'block':'none';
+  // From-card row: show for topup and transfer, hide label change
+  var fromRow=document.getElementById('ftx-card-row');if(fromRow)fromRow.style.display=(isTopup||isTransfer)?'':'none';
+  // Card in the purchase vehicle row
+  var cardInVeh=document.getElementById('ftx-card-in-veh');if(cardInVeh)cardInVeh.style.display=isPurchase?'':'none';
+  // Amount row: always visible but label changes
+  var amtRow=document.getElementById('ftx-amt-row');if(amtRow)amtRow.style.display='';
+  var lbl=document.getElementById('ftx-total-lbl');
+  if(lbl)lbl.textContent=isTransfer?'TRANSFER AMOUNT (GH\u20B5)':isTopup?'TOP-UP AMOUNT (GH\u20B5)':'TOTAL COST (GH\u20B5) \u21BB';
+  // Reference label
+  var ref=document.getElementById('ftx-ref-lbl');
+  if(ref)ref.textContent=isTransfer?'PURPOSE OF TRANSFER':isTopup?'NOTE (e.g. Cash deposit, Bank transfer)':'REFERENCE / NOTES';
+  // From card label
+  var fcLbl=document.getElementById('ftx-from-card-lbl');
+  if(fcLbl)fcLbl.textContent=isTransfer?'FROM CARD':'FUEL CARD';
+}
 
 // Auth
 document.getElementById('login-form').addEventListener('submit',async function(e){e.preventDefault();var err=document.getElementById('login-error');err.style.display='none';var btn=document.getElementById('login-btn');btn.disabled=true;btn.textContent='Signing in\u2026';try{var d=await post('/auth/login',{username:document.getElementById('login-user').value,password:document.getElementById('login-pass').value});TOKEN=d.token;USER=d.user;localStorage.setItem('fleet_token',TOKEN);localStorage.setItem('fleet_user',JSON.stringify(USER));initApp();}catch(ex){err.textContent=ex.message;err.style.display='block';}btn.disabled=false;btn.textContent='Sign In';});
@@ -447,18 +468,34 @@ async function openFuelTxForm(editId){
   var pf={};
   if(editId){try{var txs=await get('/fuel-transactions?limit=500');pf=txs.find(function(t){return t.id===editId;})||{};}catch(e){}}
   var isEdit=!!editId;
-  var h='<form id="ftf"><div class="fr3"><div class="fg"><label>Date *</label><input name="transaction_date" type="datetime-local" value="'+(pf.transaction_date?pf.transaction_date.slice(0,16):new Date().toISOString().slice(0,16))+'" required></div><div class="fg"><label>Type</label><select name="transaction_type" onchange="toggleTxType(this.value)"><option value="purchase"'+(pf.transaction_type==='purchase'?' selected':'')+'>Purchase</option><option value="topup"'+(pf.transaction_type==='topup'?' selected':'')+'>Top-up</option><option value="transfer"'+(pf.transaction_type==='transfer'?' selected':'')+'>Transfer</option></select></div><div class="fg" id="ftx-transfer" style="display:'+(pf.transaction_type==='transfer'?'block':'none')+'"><label>Transfer To Card *</label><select name="transfer_to_card_id">'+sopts(LK.fuel_cards,'id',function(c){return c.card_number;},pf.transfer_to_card_id)+'</select></div></div>';
-  h+='<div class="fr3" id="ftx-veh"'+(pf.transaction_type==='transfer'?' style="display:none"':'')+'><div class="fg"><label>Vehicle</label><select name="vehicle_id">'+sopts(LK.vehicles,'id',function(v){return v.registration+' \u2014 '+v.unit_number;},pf.vehicle_id)+'</select></div>';
-  h+='<div class="fg" id="ftx-driver"'+(pf.transaction_type==='transfer'?' style="display:none"':'')+'><label>Driver</label><select name="driver_id">'+sopts(LK.drivers,'id',function(d){return d.first_name+' '+d.last_name;},pf.driver_id)+'</select></div>';
-  h+='<div class="fg"><label>Fuel Card</label><select name="fuel_card_id">'+sopts(LK.fuel_cards,'id',function(c){return c.card_number+(c.unit_number?' ('+c.unit_number+')':'');},pf.fuel_card_id)+'</select></div></div>';
-  h+='<div class="fr3" id="ftx-fuel"'+(pf.transaction_type==='transfer'?' style="display:none"':'')+'><div class="fg" id="ftx-station"><label>Station</label><select name="vendor_id">'+sopts(LK.vendors||[],'id','name',pf.vendor_id)+'</select></div><div class="fg"><label>Location</label><input name="location" value="'+esc(pf.location||'')+'"></div><div class="fg" id="ftx-project"'+(pf.transaction_type==='transfer'?' style="display:none"':'')+'><label>Project</label><select name="project_id">'+sopts(LK.projects,'id','name',pf.project_id)+'</select></div></div>';
-  h+='<div class="fr3" id="ftx-litres"'+(pf.transaction_type==='transfer'?' style="display:none"':'')+'><div class="fg"><label>Litres</label><input id="ftx-l" name="litres" type="number" step=".001" value="'+(pf.litres||'')+'" oninput="calcFuel()"></div><div class="fg" id="ftx-cpl"><label>Cost per Litre</label><input id="ftx-c" name="cost_per_litre" type="number" step=".0001" value="'+(pf.cost_per_litre||'')+'" oninput="calcFuel()"></div><div class="fg"><label id="ftx-total-lbl">'+(pf.transaction_type==='transfer'?'TRANSFER AMOUNT (GH\u20B5)':'TOTAL COST (GH\u20B5) \u21BB')+'</label><input id="ftx-t" name="total_cost" type="number" step=".01" value="'+(pf.total_cost||'')+'" class="auto-calc"></div></div>';
-  h+='<div class="fr" id="ftx-odo"'+(pf.transaction_type==='transfer'?' style="display:none"':'')+'><div class="fg"><label>Odo Start</label><input name="odometer_start" type="number" value="'+(pf.odometer_start||'')+'"></div><div class="fg"><label>Odo End</label><input name="odometer_end" type="number" value="'+(pf.odometer_end||'')+'"></div></div>';
-  h+='<div class="fr" id="ftx-invoice"'+(pf.transaction_type==='transfer'?' style="display:none"':'')+'><div class="fg"><label>Invoice #</label><input name="invoice_number" value="'+esc(pf.invoice_number||'')+'"></div><div class="fg" id="ftx-purpose"'+(pf.transaction_type==='transfer'?' style="display:none"':'')+'><label>Trip Purpose</label><input name="trip_purpose" value="'+esc(pf.trip_purpose||'')+'"></div></div>';
-  h+='<div class="fg"><label id="ftx-ref-lbl">'+(pf.transaction_type==='transfer'?'PURPOSE OF TRANSFER':'REFERENCE / NOTES')+'</label><input name="reference" value="'+esc(pf.reference||'')+'"></div></form>';
+  var isPurch=!pf.transaction_type||pf.transaction_type==='purchase';var isTop=pf.transaction_type==='topup';var isTrans=pf.transaction_type==='transfer';
+  var h='<form id="ftf">';
+  // Row 1: Date + Type + Transfer-To (conditional)
+  h+='<div class="fr3"><div class="fg"><label>Date *</label><input name="transaction_date" type="datetime-local" value="'+(pf.transaction_date?pf.transaction_date.slice(0,16):new Date().toISOString().slice(0,16))+'" required></div>';
+  h+='<div class="fg"><label>Type</label><select name="transaction_type" onchange="toggleTxType(this.value)"><option value="purchase"'+(isPurch?' selected':'')+'>Purchase</option><option value="topup"'+(isTop?' selected':'')+'>Top-up</option><option value="transfer"'+(isTrans?' selected':'')+'>Transfer</option></select></div>';
+  h+='<div class="fg" id="ftx-transfer" style="display:'+(isTrans?'block':'none')+'"><label>Transfer To Card *</label><select name="transfer_to_card_id">'+sopts(LK.fuel_cards,'id',function(c){return c.card_number;},pf.transfer_to_card_id)+'</select></div></div>';
+  // Row 2 (purchase only): Vehicle + Driver + Card
+  h+='<div class="fr3" id="ftx-veh" style="display:'+(isPurch?'':'none')+'"><div class="fg"><label>Vehicle</label><select name="vehicle_id">'+sopts(LK.vehicles,'id',function(v){return v.registration+' \u2014 '+v.unit_number;},pf.vehicle_id)+'</select></div>';
+  h+='<div class="fg"><label>Driver</label><select name="driver_id">'+sopts(LK.drivers,'id',function(d){return d.first_name+' '+d.last_name;},pf.driver_id)+'</select></div>';
+  h+='<div class="fg" id="ftx-card-in-veh"><label>Fuel Card</label><select name="fuel_card_id" id="ftx-card-purchase">'+sopts(LK.fuel_cards,'id',function(c){return c.card_number+(c.unit_number?' ('+c.unit_number+')':'');},pf.fuel_card_id)+'</select></div></div>';
+  // Row 2b (topup/transfer): From Card (standalone row)
+  h+='<div class="fr" id="ftx-card-row" style="display:'+((isTop||isTrans)?'':'none')+'"><div class="fg"><label id="ftx-from-card-lbl">'+(isTrans?'FROM CARD':'FUEL CARD')+'</label><select name="fuel_card_id_alt" id="ftx-card-alt">'+sopts(LK.fuel_cards,'id',function(c){return c.card_number+(c.unit_number?' ('+c.unit_number+')':'');},pf.fuel_card_id)+'</select></div><div class="fg"></div></div>';
+  // Row 3 (purchase only): Station + Location + Project
+  h+='<div class="fr3" id="ftx-fuel" style="display:'+(isPurch?'':'none')+'"><div class="fg"><label>Station</label><select name="vendor_id">'+sopts(LK.vendors||[],'id','name',pf.vendor_id)+'</select></div><div class="fg"><label>Location</label><input name="location" value="'+esc(pf.location||'')+'"></div><div class="fg"><label>Project</label><select name="project_id">'+sopts(LK.projects,'id','name',pf.project_id)+'</select></div></div>';
+  // Row 4 (purchase only): Litres + Cost/L + Total
+  h+='<div class="fr3" id="ftx-litres" style="display:'+(isPurch?'':'none')+'"><div class="fg"><label>Litres</label><input id="ftx-l" name="litres" type="number" step=".001" value="'+(pf.litres||'')+'" oninput="calcFuel()"></div><div class="fg"><label>Cost per Litre</label><input id="ftx-c" name="cost_per_litre" type="number" step=".0001" value="'+(pf.cost_per_litre||'')+'" oninput="calcFuel()"></div><div class="fg"></div></div>';
+  // Amount row (always visible, label changes)
+  h+='<div class="fr" id="ftx-amt-row"><div class="fg"><label id="ftx-total-lbl">'+(isTrans?'TRANSFER AMOUNT (GH\u20B5)':isTop?'TOP-UP AMOUNT (GH\u20B5)':'TOTAL COST (GH\u20B5) \u21BB')+'</label><input id="ftx-t" name="total_cost" type="number" step=".01" value="'+(pf.total_cost||'')+'"'+(isPurch?' class="auto-calc"':'')+'></div><div class="fg" id="ftx-invoice" style="display:'+(isPurch?'':'none')+'"><label>Invoice #</label><input name="invoice_number" value="'+esc(pf.invoice_number||'')+'"></div></div>';
+  // Row 5 (purchase only): Odometer
+  h+='<div class="fr" id="ftx-odo" style="display:'+(isPurch?'':'none')+'"><div class="fg"><label>Odo Start</label><input name="odometer_start" type="number" value="'+(pf.odometer_start||'')+'"></div><div class="fg"><label>Odo End</label><input name="odometer_end" type="number" value="'+(pf.odometer_end||'')+'"></div></div>';
+  // Reference (always visible, label changes)
+  h+='<div class="fg"><label id="ftx-ref-lbl">'+(isTrans?'PURPOSE OF TRANSFER':isTop?'NOTE (e.g. Cash deposit, Bank transfer)':'REFERENCE / NOTES')+'</label><input name="reference" value="'+esc(pf.reference||'')+'"></div></form>';
   openModal(isEdit?'Edit Transaction':'Record Fuel Transaction',h,'<button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" onclick="saveFuelTx('+(editId||'null')+')">'+(isEdit?'Update':'Save')+'</button>',true);
 }
-async function saveFuelTx(editId){var fd=new FormData(document.getElementById('ftf'));var d={};for(var p of fd.entries()){var k=p[0],v=p[1];if(['vehicle_id','driver_id','fuel_card_id','transfer_to_card_id','fuel_type_id','vendor_id','project_id','odometer_start','odometer_end'].indexOf(k)>=0)d[k]=v?parseInt(v):null;else if(['litres','cost_per_litre','total_cost'].indexOf(k)>=0)d[k]=v?parseFloat(v):null;else d[k]=v||null;}try{if(editId){
+async function saveFuelTx(editId){var fd=new FormData(document.getElementById('ftf'));var d={};for(var p of fd.entries()){var k=p[0],v=p[1];if(k==='fuel_card_id_alt')continue;else if(['vehicle_id','driver_id','fuel_card_id','transfer_to_card_id','fuel_type_id','vendor_id','project_id','odometer_start','odometer_end'].indexOf(k)>=0)d[k]=v?parseInt(v):null;else if(['litres','cost_per_litre','total_cost'].indexOf(k)>=0)d[k]=v?parseFloat(v):null;else d[k]=v||null;}
+// For topup/transfer, the card comes from the alt select
+if(d.transaction_type==='topup'||d.transaction_type==='transfer'){var altCard=document.getElementById('ftx-card-alt');if(altCard&&altCard.value)d.fuel_card_id=parseInt(altCard.value);}
+try{if(editId){
   // Get old transaction to know what balance effect to reverse
   var oldTxs=await get('/fuel-transactions?limit=500');var oldTx=oldTxs.find(function(t){return t.id===editId;});
   if(oldTx&&oldTx.fuel_card_id&&oldTx.total_cost){
