@@ -872,15 +872,26 @@ def _check_card_balance(card):
 def card_statement(cid: int, user=Depends(get_current_user)):
     card = query_one("""SELECT fc.*, v.unit_number, v.registration 
                         FROM fuel_cards fc LEFT JOIN vehicles v ON v.id=fc.vehicle_id WHERE fc.id=%s""", (cid,))
+    # Get transactions where this card is the source (fuel_card_id) OR the destination (transfer_to_card_id)
     txns = query("""SELECT ft.*, v.unit_number, v.registration,
                     d.first_name||' '||d.last_name AS driver_name,
-                    vn.name AS vendor_name, p.name AS project_name
+                    vn.name AS vendor_name, p.name AS project_name,
+                    fc_from.card_number AS from_card_number,
+                    fc_to.card_number AS to_card_number,
+                    CASE 
+                        WHEN ft.transaction_type='transfer' AND ft.transfer_to_card_id=%s THEN 'transfer_in'
+                        WHEN ft.transaction_type='transfer' AND ft.fuel_card_id=%s THEN 'transfer_out'
+                        ELSE ft.transaction_type 
+                    END AS display_type
                     FROM fuel_transactions ft 
                     LEFT JOIN vehicles v ON v.id=ft.vehicle_id
                     LEFT JOIN drivers d ON d.id=ft.driver_id
                     LEFT JOIN vendors vn ON vn.id=ft.vendor_id
                     LEFT JOIN projects p ON p.id=ft.project_id
-                    WHERE ft.fuel_card_id=%s ORDER BY ft.transaction_date""", (cid,))
+                    LEFT JOIN fuel_cards fc_from ON fc_from.id=ft.fuel_card_id
+                    LEFT JOIN fuel_cards fc_to ON fc_to.id=ft.transfer_to_card_id
+                    WHERE ft.fuel_card_id=%s OR ft.transfer_to_card_id=%s
+                    ORDER BY ft.transaction_date, ft.id""", (cid, cid, cid, cid))
     topups = sum(float(t["total_cost"] or 0) for t in txns if t["transaction_type"] == "topup")
     expenses = sum(float(t["total_cost"] or 0) for t in txns if t["transaction_type"] == "purchase")
     return {"card": card, "transactions": txns, "summary": {"topups": topups, "expenses": expenses, "balance": float(card.get("current_balance") or 0), "initial_balance": float(card.get("initial_balance") or 0)}}
