@@ -433,11 +433,11 @@ async function viewStatement(cid){STMT_CID=cid;var s=await get('/fuel-cards/'+ci
   // Filter transactions by date range
   var filtered=allTxns;
   if(dateFrom||dateTo){filtered=allTxns.filter(function(t){var d=t.transaction_date?t.transaction_date.slice(0,10):'';if(dateFrom&&d<dateFrom)return false;if(dateTo&&d>dateTo)return false;return true;});}
-  // Opening balance for filtered period = initial + net of all txns BEFORE the filter start
+  // Opening balance for filtered period
   var openBal=initialBalance;
-  if(dateFrom){allTxns.forEach(function(t){var d=t.transaction_date?t.transaction_date.slice(0,10):'';if(d<dateFrom){var a=Number(t.total_cost||0);if(t.transaction_type==='topup'){openBal+=a;}else{openBal-=a;}}});}
+  if(dateFrom){allTxns.forEach(function(t){var d=t.transaction_date?t.transaction_date.slice(0,10):'';if(d<dateFrom){var a=Number(t.total_cost||0);var dt=t.display_type||t.transaction_type;if(dt==='topup'||dt==='transfer_in'){openBal+=a;}else{openBal-=a;}}});}
   // Period summary
-  var pTop=0,pExp=0,pTrOut=0;filtered.forEach(function(t){var a=Number(t.total_cost||0);if(t.transaction_type==='topup'){pTop+=a;}else if(t.transaction_type==='purchase'){pExp+=a;}else if(t.transaction_type==='transfer'){pTrOut+=a;}});
+  var pTop=0,pExp=0,pTrOut=0,pTrIn=0;filtered.forEach(function(t){var a=Number(t.total_cost||0);var dt=t.display_type||t.transaction_type;if(dt==='topup'){pTop+=a;}else if(dt==='purchase'){pExp+=a;}else if(dt==='transfer_out'){pTrOut+=a;}else if(dt==='transfer_in'){pTrIn+=a;}});
   // Build UI
   var h='<div class="toolbar" style="margin-bottom:16px"><span style="font-size:.82rem;color:var(--tx2);font-weight:500">Period:</span><input type="date" id="stmt-from" value="'+dateFrom+'" onchange="viewStatement('+cid+')"><span style="color:var(--tx3);font-size:.82rem">to</span><input type="date" id="stmt-to" value="'+dateTo+'" onchange="viewStatement('+cid+')"><button class="btn btn-s btn-sm" onclick="document.getElementById(\'stmt-from\').value=\'\';document.getElementById(\'stmt-to\').value=\'\';viewStatement('+cid+')">Clear</button></div>';
   h+='<div class="stat-grid" style="margin-bottom:16px"><div class="stat-card sc-green"><div class="stat-label">Top-ups (Period)</div><div class="stat-value accent" style="font-size:1.1rem">GH\u20B5'+fmt(pTop)+'</div></div><div class="stat-card sc-red"><div class="stat-label">Purchases (Period)</div><div class="stat-value danger" style="font-size:1.1rem">GH\u20B5'+fmt(pExp)+'</div></div><div class="stat-card sc-blue"><div class="stat-label">Current Balance</div><div class="stat-value blue" style="font-size:1.1rem">GH\u20B5'+fmt(s.summary.balance)+'</div></div></div>';
@@ -445,10 +445,27 @@ async function viewStatement(cid){STMT_CID=cid;var s=await get('/fuel-cards/'+ci
   h+='<tr style="background:var(--sf2)"><td colspan="2" style="font-weight:600;font-style:italic">Opening Balance</td><td></td><td></td><td class="cm" style="text-align:right;font-weight:700">'+fmt(openBal)+'</td><td style="color:var(--tx3);font-style:italic">Balance brought forward</td></tr>';
   var runBal=openBal;
   if(filtered.length){filtered.forEach(function(t){
-    var amt=Number(t.total_cost||0);var isCredit=t.transaction_type==='topup';
+    var amt=Number(t.total_cost||0);
+    var dt=t.display_type||t.transaction_type;
+    var isCredit=(dt==='topup'||dt==='transfer_in');
     if(isCredit){runBal+=amt;}else{runBal-=amt;}
-    var typeBadge=t.transaction_type==='topup'?'bg':t.transaction_type==='purchase'?'br':'by';
-    h+='<tr><td>'+fmtD(t.transaction_date)+'</td><td><span class="badge '+typeBadge+'">'+esc(t.transaction_type)+'</span></td><td class="cm" style="text-align:right">'+(isCredit?'':fmt(amt))+'</td><td class="cm" style="text-align:right;color:var(--ac)">'+(isCredit?fmt(amt):'')+'</td><td class="cm" style="text-align:right;font-weight:600">'+fmt(runBal)+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+esc(t.reference||t.vendor_name||'\u2014')+'</td></tr>';
+    // Badge color and label
+    var typeBadge,typeLabel;
+    if(dt==='topup'){typeBadge='bg';typeLabel='TOP-UP';}
+    else if(dt==='purchase'){typeBadge='br';typeLabel='PURCHASE';}
+    else if(dt==='transfer_out'){typeBadge='by';typeLabel='TRANSFER OUT';}
+    else if(dt==='transfer_in'){typeBadge='bg';typeLabel='TRANSFER IN';}
+    else{typeBadge='bgr';typeLabel=dt.toUpperCase();}
+    // Build reference text
+    var refParts=[];
+    if(t.reference)refParts.push(t.reference);
+    if(t.trip_purpose)refParts.push(t.trip_purpose);
+    if(dt==='transfer_out'&&t.to_card_number)refParts.push('To: '+t.to_card_number);
+    if(dt==='transfer_in'&&t.from_card_number)refParts.push('From: '+t.from_card_number);
+    if(dt==='purchase'&&t.vendor_name)refParts.push(t.vendor_name);
+    if(t.project_name)refParts.push('['+t.project_name+']');
+    var refText=refParts.length?refParts.join(' \u2022 '):'\u2014';
+    h+='<tr><td>'+fmtD(t.transaction_date)+'</td><td><span class="badge '+typeBadge+'">'+typeLabel+'</span></td><td class="cm" style="text-align:right">'+(isCredit?'':fmt(amt))+'</td><td class="cm" style="text-align:right;color:var(--ac)">'+(isCredit?fmt(amt):'')+'</td><td class="cm" style="text-align:right;font-weight:600">'+fmt(runBal)+'</td><td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">'+esc(refText)+'</td></tr>';
   });}else{h+='<tr><td colspan="6"><div class="empty-state" style="padding:20px"><p>No transactions in this period</p></div></td></tr>';}
   h+='<tr style="background:var(--sf2);border-top:2px solid var(--tx)"><td colspan="2" style="font-weight:700">Closing Balance</td><td></td><td></td><td class="cm" style="text-align:right;font-weight:700;font-size:.95rem;text-decoration:double underline">'+fmt(runBal)+'</td><td></td></tr>';
   h+='</tbody></table>';
