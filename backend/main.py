@@ -55,7 +55,7 @@ def require_admin(user=Depends(get_current_user)):
 class LoginRequest(BaseModel): username:str; password:str
 
 class VehicleCreate(BaseModel):
-    unit_number:str; registration:str; vin:Optional[str]=None; make:Optional[str]=None
+    unit_number:str; registration:Optional[str]=None; vin:Optional[str]=None; make:Optional[str]=None
     model:Optional[str]=None; year:Optional[int]=None; color:Optional[str]=None
     engine_number:Optional[str]=None; vehicle_type_id:Optional[int]=None
     fuel_type_id:Optional[int]=None; department_id:Optional[int]=None; group_id:Optional[int]=None
