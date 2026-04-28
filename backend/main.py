@@ -187,7 +187,13 @@ def dashboard(user=Depends(get_current_user)):
         FROM vehicles v LEFT JOIN fuel_transactions ft ON ft.vehicle_id=v.id AND ft.transaction_type='purchase' AND ft.transaction_date>=NOW()-INTERVAL '3 months'
         WHERE v.is_active=true GROUP BY v.id,v.unit_number,v.registration ORDER BY fuel_cost DESC LIMIT 8
     """)
-    return {"stats":stats,"reminders":reminders,"recent_fuel":recent_fuel,"fuel_by_month":fuel_by_month,"cost_by_vehicle":cost_by_vehicle}
+    return {"stats":stats,"reminders":reminders,"recent_fuel":recent_fuel,"fuel_by_month":fuel_by_month,"cost_by_vehicle":cost_by_vehicle,
+            "maint_by_month":query("""
+                SELECT TO_CHAR(DATE_TRUNC('month',service_date),'Mon YY') AS month,
+                       SUM(total_cost) AS total_cost, COUNT(*) AS service_count
+                FROM maintenance_records WHERE service_date>=NOW()-INTERVAL '6 months'
+                GROUP BY DATE_TRUNC('month',service_date) ORDER BY DATE_TRUNC('month',service_date)
+            """)}
 
 # ── Vehicles ──────────────────────────────────────────────────────────────────
 @app.get("/api/vehicles")
@@ -897,15 +903,26 @@ def card_statement(cid: int, user=Depends(get_current_user)):
     return {"card": card, "transactions": txns, "summary": {"topups": topups, "expenses": expenses, "balance": float(card.get("current_balance") or 0), "initial_balance": float(card.get("initial_balance") or 0)}}
 
 @app.get("/api/reports/fuel-cards")
-def report_fuel_cards(user=Depends(get_current_user)):
+def report_fuel_cards(date_from:Optional[str]=None,date_to:Optional[str]=None,user=Depends(get_current_user)):
+    date_filter=""
+    params_top=[]
+    params_exp=[]
+    params_trout=[]
+    params_trin=[]
+    if date_from:
+        date_filter+=" AND transaction_date>=%s"
+        params_top.append(date_from);params_exp.append(date_from);params_trout.append(date_from);params_trin.append(date_from)
+    if date_to:
+        date_filter+=" AND transaction_date<=%s"
+        params_top.append(date_to);params_exp.append(date_to);params_trout.append(date_to);params_trin.append(date_to)
     cards = query("""SELECT fc.*, v.unit_number, v.registration, v.make, v.model,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='topup'),0) AS total_topups,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'),0) AS total_expenses,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='transfer'),0) AS total_transfers_out,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE transfer_to_card_id=fc.id AND transaction_type='transfer'),0) AS total_transfers_in,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='topup'"""+date_filter+"""),0) AS total_topups,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'"""+date_filter+"""),0) AS total_expenses,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='transfer'"""+date_filter+"""),0) AS total_transfers_out,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE transfer_to_card_id=fc.id AND transaction_type='transfer'"""+date_filter+"""),0) AS total_transfers_in,
                      (SELECT MAX(transaction_date) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase') AS last_used
                      FROM fuel_cards fc LEFT JOIN vehicles v ON v.id=fc.vehicle_id
-                     WHERE fc.is_active=true ORDER BY fc.card_number""")
+                     WHERE fc.is_active=true ORDER BY fc.card_number""", params_top+params_exp+params_trout+params_trin)
     total_balance = sum(float(c.get("current_balance") or 0) for c in cards)
     total_topups = sum(float(c.get("total_topups") or 0) for c in cards)
     total_expenses = sum(float(c.get("total_expenses") or 0) for c in cards)
