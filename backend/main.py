@@ -177,7 +177,7 @@ def dashboard(user=Depends(get_current_user)):
     fuel_by_month=query("""
         SELECT TO_CHAR(DATE_TRUNC('month',transaction_date),'Mon YY') AS month,
                SUM(total_cost) AS total_cost, SUM(litres) AS total_litres
-        FROM fuel_transactions WHERE transaction_type='purchase' AND transaction_date>=NOW()-INTERVAL '6 months'
+        FROM fuel_transactions WHERE transaction_type='purchase' AND transaction_date>=NOW()-INTERVAL '12 months'
         GROUP BY DATE_TRUNC('month',transaction_date) ORDER BY DATE_TRUNC('month',transaction_date)
     """)
     cost_by_vehicle=query("""
@@ -191,7 +191,7 @@ def dashboard(user=Depends(get_current_user)):
             "maint_by_month":query("""
                 SELECT TO_CHAR(DATE_TRUNC('month',service_date),'Mon YY') AS month,
                        SUM(total_cost) AS total_cost, COUNT(*) AS service_count
-                FROM maintenance_records WHERE service_date>=NOW()-INTERVAL '6 months'
+                FROM maintenance_records WHERE service_date>=NOW()-INTERVAL '12 months'
                 GROUP BY DATE_TRUNC('month',service_date) ORDER BY DATE_TRUNC('month',service_date)
             """)}
 
