@@ -323,14 +323,20 @@ h+='<div class="stat-card sc-blue"><div class="stat-icon">&#128506;&#65039;</div
 h+='<div class="stat-card sc-green"><div class="stat-icon">&#128179;</div><div class="stat-label">Fuel Cards</div><div class="stat-value accent">'+s.fuel_cards_total+'</div></div>';
 h+='<div class="stat-card '+(s.reminders_critical>0?'sc-red':'sc-amber')+'"><div class="stat-icon">&#128276;</div><div class="stat-label">Reminders</div><div class="stat-value '+(s.reminders_critical>0?'danger':'warning')+'">'+s.reminders_active+'</div>'+(s.reminders_critical>0?'<div class="stat-sub" style="color:var(--dn);font-weight:600">'+s.reminders_critical+' critical</div>':'')+'</div>';
 h+='<div class="stat-card sc-blue"><div class="stat-icon">&#128193;</div><div class="stat-label">Projects</div><div class="stat-value blue">'+s.projects_active+'</div></div></div>';
-h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px"><div class="card"><div class="card-header">Fuel Spend \u2014 6 Months</div><div class="card-body" id="d-chart"></div></div>';
-h+='<div class="card"><div class="card-header">Vehicle Costs (3 Mo)</div><div class="card-body" id="d-costs"></div></div></div>';
-h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:4px"><div class="card"><div class="card-header">Reminders</div><div class="card-body no-pad" id="d-rem"></div></div>';
-h+='<div class="card"><div class="card-header">Recent Fuel</div><div class="card-body no-pad" id="d-fuel"></div></div></div>';
+h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px"><div class="card"><div class="card-header"><span>&#9981; Fuel Consumption \u2014 6 Months</span></div><div class="card-body" id="d-chart"></div></div>';
+h+='<div class="card"><div class="card-header"><span>&#128295; Maintenance Cost \u2014 6 Months</span></div><div class="card-body" id="d-maint"></div></div></div>';
+h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:4px"><div class="card"><div class="card-header">Vehicle Cost Breakdown (3 Mo)</div><div class="card-body" id="d-costs"></div></div>';
+h+='<div class="card"><div class="card-header">Active Reminders</div><div class="card-body no-pad" id="d-rem"></div></div></div>';
+h+='<div class="card" style="margin-top:4px"><div class="card-header">Recent Fuel Transactions</div><div class="card-body no-pad" id="d-fuel"></div></div>';
 mc.innerHTML=h;
+// Fuel chart
 var ce=document.getElementById('d-chart');
-if(d.fuel_by_month&&d.fuel_by_month.length){var mx=Math.max.apply(null,d.fuel_by_month.map(function(m){return Number(m.total_cost);}));var ch='<div class="chart-bar-group">';d.fuel_by_month.forEach(function(m){var p=mx>0?(Number(m.total_cost)/mx*100):0;ch+='<div class="chart-bar" style="height:'+Math.max(p,3)+'%"><div class="chart-tooltip">GH\u20B5'+fmt(m.total_cost)+'</div></div>';});ch+='</div><div class="chart-labels">';d.fuel_by_month.forEach(function(m){ch+='<span>'+esc(m.month)+'</span>';});ch+='</div>';ce.innerHTML=ch;}
-else ce.innerHTML='<div class="empty-state"><p>No data</p></div>';
+if(d.fuel_by_month&&d.fuel_by_month.length){var mx=Math.max.apply(null,d.fuel_by_month.map(function(m){return Number(m.total_cost);}));var ch='<div class="chart-bar-group">';d.fuel_by_month.forEach(function(m){var p=mx>0?(Number(m.total_cost)/mx*100):0;ch+='<div class="chart-bar" style="height:'+Math.max(p,3)+'%"><div class="chart-tooltip">GH\u20B5'+fmt(m.total_cost)+(m.total_litres?'<br>'+fmt(m.total_litres,0)+' litres':'')+'</div></div>';});ch+='</div><div class="chart-labels">';d.fuel_by_month.forEach(function(m){ch+='<span>'+esc(m.month)+'</span>';});ch+='</div>';ce.innerHTML=ch;}
+else ce.innerHTML='<div class="empty-state" style="padding:32px"><p>No fuel data yet</p></div>';
+// Maintenance chart
+var me=document.getElementById('d-maint');
+if(d.maint_by_month&&d.maint_by_month.length){var mmx=Math.max.apply(null,d.maint_by_month.map(function(m){return Number(m.total_cost);}));var mch='<div class="chart-bar-group">';d.maint_by_month.forEach(function(m){var p=mmx>0?(Number(m.total_cost)/mmx*100):0;mch+='<div class="chart-bar" style="height:'+Math.max(p,3)+'%;background:linear-gradient(180deg,var(--wn),rgba(245,166,35,.4))"><div class="chart-tooltip">GH\u20B5'+fmt(m.total_cost)+'<br>'+m.service_count+' services</div></div>';});mch+='</div><div class="chart-labels">';d.maint_by_month.forEach(function(m){mch+='<span>'+esc(m.month)+'</span>';});mch+='</div>';me.innerHTML=mch;}
+else me.innerHTML='<div class="empty-state" style="padding:32px"><p>No maintenance data yet</p></div>';
 var co=document.getElementById('d-costs');
 if(d.cost_by_vehicle&&d.cost_by_vehicle.length){var mx2=Math.max.apply(null,d.cost_by_vehicle.map(function(v){return Number(v.fuel_cost)+Number(v.maint_cost);}));var ch2='';d.cost_by_vehicle.forEach(function(v){var t=Number(v.fuel_cost)+Number(v.maint_cost);var pct=mx2>0?Math.round(t/mx2*100):0;ch2+='<div class="cost-row"><div class="cost-vehicle">'+esc(v.registration||v.unit_number)+'</div><div class="cost-bar-wrap"><div class="cost-bar-fill" style="width:'+pct+'%"></div></div><div class="cost-amount">GH\u20B5'+fmt(t)+'</div></div>';});co.innerHTML=ch2;}
 else co.innerHTML='<div class="empty-state"><p>No data</p></div>';
@@ -557,25 +563,36 @@ async function renderReports(){var mc=document.getElementById('mc');mc.innerHTML
 async function loadRpt(type,btn){
   if(btn)document.querySelectorAll('#rp-tabs .tab-btn').forEach(function(b){b.classList.toggle('active',b===btn);});
   var el=document.getElementById('rp-content');var flt=document.getElementById('rp-filters');
-  el.innerHTML='<div class="page-loading" style="min-height:200px"><div class="spinner"></div></div>';flt.innerHTML='';
+  el.innerHTML='<div class="page-loading" style="min-height:200px"><div class="spinner"></div></div>';
   var data;
-  // Build query params for fuel report filters
+  // Read existing filter values BEFORE any DOM changes
+  var fuelFrom=document.getElementById('rpt-fuel-from');var savedFF=fuelFrom?fuelFrom.value:'';
+  var fuelTo=document.getElementById('rpt-fuel-to');var savedFT=fuelTo?fuelTo.value:'';
+  var fuelVeh=document.getElementById('rpt-fuel-veh');var savedFV=fuelVeh?fuelVeh.value:'';
+  var fuelProj=document.getElementById('rpt-fuel-proj');var savedFP=fuelProj?fuelProj.value:'';
+  var fcFrom=document.getElementById('fc-from');var savedCF=fcFrom?fcFrom.value:'';
+  var fcTo=document.getElementById('fc-to');var savedCT=fcTo?fcTo.value:'';
+  // Clear filters only when switching tabs
+  if(btn)flt.innerHTML='';
+  // Build query params
   var qp='';
   if(type==='fuel'){
-    var ff=document.getElementById('rpt-fuel-from');var ft=document.getElementById('rpt-fuel-to');
-    var fv=document.getElementById('rpt-fuel-veh');var fp=document.getElementById('rpt-fuel-proj');
     var parts=[];
-    if(ff&&ff.value)parts.push('date_from='+ff.value);
-    if(ft&&ft.value)parts.push('date_to='+ft.value);
-    if(fv&&fv.value)parts.push('vehicle_id='+fv.value);
-    if(fp&&fp.value)parts.push('project_id='+fp.value);
+    if(savedFF)parts.push('date_from='+savedFF);
+    if(savedFT)parts.push('date_to='+savedFT);
+    if(savedFV)parts.push('vehicle_id='+savedFV);
+    if(savedFP)parts.push('project_id='+savedFP);
     if(parts.length)qp='?'+parts.join('&');
-    // Show filters
-    if(!ff){
-      var vh2='';(LK.vehicles||[]).forEach(function(v){vh2+='<option value="'+v.id+'">'+esc(v.registration)+' \u2014 '+esc(v.unit_number)+'</option>';});
-      var ph2='';(LK.projects||[]).forEach(function(p){ph2+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});
-      flt.innerHTML='<div class="toolbar" style="margin-bottom:0"><span style="font-size:.82rem;color:var(--tx2);font-weight:500">Filter:</span><input type="date" id="rpt-fuel-from" onchange="loadRpt(\'fuel\')"><span style="color:var(--tx3);font-size:.82rem">to</span><input type="date" id="rpt-fuel-to" onchange="loadRpt(\'fuel\')"><select id="rpt-fuel-veh" onchange="loadRpt(\'fuel\')"><option value="">All Vehicles</option>'+vh2+'</select><select id="rpt-fuel-proj" onchange="loadRpt(\'fuel\')"><option value="">All Projects</option>'+ph2+'</select></div>';
-    }
+    // Build filter UI (always rebuild to ensure it exists)
+    var vh2='';(LK.vehicles||[]).forEach(function(v){vh2+='<option value="'+v.id+'"'+(v.id==savedFV?' selected':'')+'>'+((v.registration?v.registration+' \u2014 ':'')+v.unit_number)+'</option>';});
+    var ph2='';(LK.projects||[]).forEach(function(p){ph2+='<option value="'+p.id+'"'+(p.id==savedFP?' selected':'')+'>'+esc(p.name)+'</option>';});
+    flt.innerHTML='<div class="toolbar" style="margin-bottom:0"><span style="font-size:.82rem;color:var(--tx2);font-weight:500">Filter:</span><input type="date" id="rpt-fuel-from" value="'+savedFF+'" onchange="loadRpt(\'fuel\')"><span style="color:var(--tx3);font-size:.82rem">to</span><input type="date" id="rpt-fuel-to" value="'+savedFT+'" onchange="loadRpt(\'fuel\')"><select id="rpt-fuel-veh" onchange="loadRpt(\'fuel\')"><option value="">All Vehicles</option>'+vh2+'</select><select id="rpt-fuel-proj" onchange="loadRpt(\'fuel\')"><option value="">All Projects</option>'+ph2+'</select><button class="btn btn-s btn-sm" onclick="document.getElementById(\'rpt-fuel-from\').value=\'\';document.getElementById(\'rpt-fuel-to\').value=\'\';document.getElementById(\'rpt-fuel-veh\').value=\'\';document.getElementById(\'rpt-fuel-proj\').value=\'\';loadRpt(\'fuel\')">Clear</button></div>';
+  }
+  if(type==='fuel-cards'){
+    var cparts=[];
+    if(savedCF)cparts.push('date_from='+savedCF);
+    if(savedCT)cparts.push('date_to='+savedCT);
+    if(cparts.length)qp='?'+cparts.join('&');
   }
   try{data=await get('/reports/'+type+qp);}catch(err){el.innerHTML='<div class="empty-state"><p>Error: '+esc(err.message)+'</p></div>';return;}
 
@@ -610,9 +627,10 @@ async function loadRpt(type,btn){
     h+='</tbody></table>';el.innerHTML=h;
   }else if(type==='fuel-cards'){
     var fc=data;if(!fc||!fc.cards){el.innerHTML='<div class="empty-state"><p>No fuel card data</p></div>';return;}
-    // Period date filter UI
+    // Period date filter UI with preserved values
     var now=new Date();var firstDay=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);var today=now.toISOString().slice(0,10);
-    flt.innerHTML='<div class="toolbar" style="margin-bottom:0"><span style="font-size:.85rem;color:var(--tx2);font-weight:500">Period:</span><input type="date" id="fc-from" value="'+firstDay+'" onchange="loadRpt(\'fuel-cards\')"><span style="color:var(--tx3)">to</span><input type="date" id="fc-to" value="'+today+'" onchange="loadRpt(\'fuel-cards\')"></div>';
+    var periodFrom=savedCF||firstDay;var periodTo=savedCT||today;
+    flt.innerHTML='<div class="toolbar" style="margin-bottom:0"><span style="font-size:.85rem;color:var(--tx2);font-weight:500">Period:</span><input type="date" id="fc-from" value="'+periodFrom+'" onchange="loadRpt(\'fuel-cards\')"><span style="color:var(--tx3)">to</span><input type="date" id="fc-to" value="'+periodTo+'" onchange="loadRpt(\'fuel-cards\')"><button class="btn btn-s btn-sm" onclick="document.getElementById(\'fc-from\').value=\'\';document.getElementById(\'fc-to\').value=\'\';loadRpt(\'fuel-cards\')">Clear</button></div>';
     // Read period dates from filters (may already exist)
     var pfrom=document.getElementById('fc-from');var pto=document.getElementById('fc-to');
     var periodFrom=pfrom?pfrom.value:firstDay;var periodTo=pto?pto.value:today;
