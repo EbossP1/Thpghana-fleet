@@ -193,7 +193,7 @@ body{background:#fff!important;color:#000!important;-webkit-print-color-adjust:e
 <div class="nav-label">OVERVIEW</div><div class="nav-item active" data-page="dashboard"><span class="nav-icon">&#128202;</span> Dashboard</div>
 <div class="nav-label">FLEET</div><div class="nav-item" data-page="vehicles"><span class="nav-icon">&#128663;</span> Vehicles</div>
 <div class="nav-item" data-page="drivers"><span class="nav-icon">&#128100;</span> Drivers</div>
-<div class="nav-item" data-page="trips"><span class="nav-icon">&#128506;&#65039;</span> Trip Log</div>
+<div class="nav-item" data-page="trips"><span class="nav-icon">&#128506;&#65039;</span> Trips &amp; Efficiency</div>
 <div class="nav-label">FUEL</div><div class="nav-item" data-page="fuel-cards"><span class="nav-icon">&#128179;</span> Fuel Cards</div>
 <div class="nav-item" data-page="fuel-transactions"><span class="nav-icon">&#9981;</span> Fuel Transactions</div>
 <div class="nav-label">MAINTENANCE</div><div class="nav-item" data-page="maintenance"><span class="nav-icon">&#128295;</span> Service Records</div>
@@ -205,6 +205,7 @@ body{background:#fff!important;color:#000!important;-webkit-print-color-adjust:e
 <div class="nav-label">REPORTS</div><div class="nav-item" data-page="reports"><span class="nav-icon">&#128200;</span> Reports</div>
 <div class="nav-label" id="admin-label" style="display:none">ADMIN</div>
 <div class="nav-item" data-page="users" id="nav-users" style="display:none"><span class="nav-icon">&#9881;&#65039;</span> Users</div>
+<div class="nav-item" data-page="audit" id="nav-audit" style="display:none"><span class="nav-icon">&#128221;</span> Audit Log</div>
 <div class="nav-item" data-page="settings" id="nav-settings" style="display:none"><span class="nav-icon">&#127899;&#65039;</span> Settings</div>
 </nav>
 
@@ -294,7 +295,7 @@ function logout(){TOKEN=null;USER=null;localStorage.removeItem('fleet_token');lo
 async function initApp(){document.getElementById('login-screen').style.display='none';document.getElementById('app-shell').style.display='block';
 document.getElementById('user-display').textContent=(USER.first_name||'')+' '+(USER.last_name||'')||USER.username;
 document.getElementById('user-role').textContent=USER.role;
-if(USER.role==='admin'){document.getElementById('admin-label').style.display='block';document.getElementById('nav-users').style.display='flex';document.getElementById('nav-settings').style.display='flex';}
+if(USER.role==='admin'){document.getElementById('admin-label').style.display='block';document.getElementById('nav-users').style.display='flex';document.getElementById('nav-audit').style.display='flex';document.getElementById('nav-settings').style.display='flex';}
 document.getElementById('btn-logout').onclick=logout;
 document.getElementById('menu-toggle').onclick=function(){document.getElementById('sidebar').classList.toggle('open');};
 document.addEventListener('click',function(e){var sb=document.getElementById('sidebar');var tg=document.getElementById('menu-toggle');if(sb.classList.contains('open')&&!sb.contains(e.target)&&e.target!==tg)sb.classList.remove('open');});
@@ -305,7 +306,7 @@ navigate('dashboard');}
 function navigate(page){CUR_PAGE=page;document.querySelectorAll('.nav-item').forEach(function(n){n.classList.toggle('active',n.dataset.page===page);});
 var mc=document.getElementById('mc');
 mc.innerHTML='<div class="print-header"><img src="'+LOGO+'" alt="THP Ghana"><div><h2>The Hunger Project \u2014 Ghana</h2><div class="print-sub">Fleet Management System</div></div><div class="ph-right"><div class="print-date" id="print-date"></div></div></div><div class="page-loading"><div class="spinner"></div></div>';
-var pages={dashboard:renderDashboard,vehicles:renderVehicles,drivers:renderDrivers,trips:renderTrips,'fuel-cards':renderFuelCards,'fuel-transactions':renderFuelTx,maintenance:renderMaint,insurance:renderIns,roadworthy:renderRW,reminders:renderReminders,vendors:renderVendors,projects:renderProjects,reports:renderReports,users:renderUsers,settings:renderSettings};
+var pages={dashboard:renderDashboard,vehicles:renderVehicles,drivers:renderDrivers,trips:renderTrips,'fuel-cards':renderFuelCards,'fuel-transactions':renderFuelTx,maintenance:renderMaint,insurance:renderIns,roadworthy:renderRW,reminders:renderReminders,vendors:renderVendors,projects:renderProjects,reports:renderReports,users:renderUsers,settings:renderSettings,audit:renderAudit};
 var fn=pages[page];if(fn)fn().catch(function(err){mc.innerHTML='<div class="empty-state"><p>Error: '+esc(err.message)+'</p></div>';console.error(err);});}
 
 
@@ -373,7 +374,64 @@ async function openDriverForm(id){var d={};if(id){var ds=await get('/drivers');d
 async function saveDriver(id){var fd=new FormData(document.getElementById('df'));var d={};for(var p of fd.entries()){var k=p[0],v=p[1];if(k==='department_id'||k==='category_id')d[k]=v?parseInt(v):null;else if(k==='hourly_wage')d[k]=v?parseFloat(v):0;else if(k==='file')continue;else d[k]=v||null;}try{if(id)await put('/drivers/'+id,d);else await post('/drivers',d);toast(id?'Updated':'Created');closeModal();loadDrivers();LK=await get('/lookups');}catch(e){toast(e.message,'error');}}
 
 // ======= TRIPS =======
-async function renderTrips(){var mc=document.getElementById('mc');var vh='';(LK.vehicles||[]).forEach(function(v){vh+='<option value="'+v.id+'">'+esc(v.registration)+' \u2014 '+esc(v.unit_number)+'</option>';});var ph='';(LK.projects||[]).forEach(function(p){ph+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});mc.innerHTML='<div class="page-header"><div><h2>Trip Log</h2></div><div class="header-actions"><button class="btn btn-print btn-sm" onclick="printPage()">&#128424;&#65039; Print</button><button class="btn btn-export btn-sm" onclick="exportCSV(\'trips.csv\')">&#128229; Export</button><button class="btn btn-p" onclick="openTripForm()">+ Log Trip</button></div></div><div class="toolbar"><select id="tr-v" onchange="loadTrips()"><option value="">All Vehicles</option>'+vh+'</select><select id="tr-p" onchange="loadTrips()"><option value="">All Projects</option>'+ph+'</select><input type="date" id="tr-f" onchange="loadTrips()"><input type="date" id="tr-t" onchange="loadTrips()"></div><div class="card"><div class="card-body no-pad"><div class="table-wrap" id="tr-tbl"></div></div></div>';loadTrips();}
+async function renderTrips(){var mc=document.getElementById('mc');mc.innerHTML+='<div class="page-header"><div><h2>Trips &amp; Fuel Efficiency</h2><div class="subtitle">Trip log and consumption analysis</div></div><div class="header-actions"><button class="btn btn-print btn-sm" onclick="printPage()">&#128424;&#65039; Print</button></div></div><div class="tabs" id="tr-tabs"><button class="tab-btn active" onclick="renderTripTab(this)">&#128506;&#65039; Trip Log</button><button class="tab-btn" onclick="renderEfficiency(this)">&#9981; Fuel Efficiency</button></div><div id="tr-content"></div>';renderTripTab();}
+
+function renderTripTab(btn){if(btn)document.querySelectorAll('#tr-tabs .tab-btn').forEach(function(b){b.classList.toggle('active',b===btn);});var c=document.getElementById('tr-content');var vh='';(LK.vehicles||[]).forEach(function(v){vh+='<option value="'+v.id+'">'+((v.registration?v.registration+' \u2014 ':'')+v.unit_number)+'</option>';});var ph='';(LK.projects||[]).forEach(function(p){ph+='<option value="'+p.id+'">'+esc(p.name)+'</option>';});c.innerHTML='<div class="toolbar"><select id="tr-v" onchange="loadTrips()"><option value="">All Vehicles</option>'+vh+'</select><select id="tr-p" onchange="loadTrips()"><option value="">All Projects</option>'+ph+'</select><input type="date" id="tr-f" onchange="loadTrips()"><input type="date" id="tr-t" onchange="loadTrips()"><button class="btn btn-export btn-sm" onclick="exportCSV(\'trips.csv\')">&#128229; Export</button><button class="btn btn-p btn-sm" onclick="openTripForm()">+ Log Trip</button></div><div class="card"><div class="card-body no-pad"><div class="table-wrap" id="tr-tbl"></div></div></div>';loadTrips();}
+
+async function renderEfficiency(btn){if(btn)document.querySelectorAll('#tr-tabs .tab-btn').forEach(function(b){b.classList.toggle('active',b===btn);});var c=document.getElementById('tr-content');var vh='';(LK.vehicles||[]).forEach(function(v){vh+='<option value="'+v.id+'">'+((v.registration?v.registration+' \u2014 ':'')+v.unit_number)+'</option>';});
+  // Read existing filter values
+  var ef=document.getElementById('eff-from');var savedEF=ef?ef.value:'';
+  var et=document.getElementById('eff-to');var savedET=et?et.value:'';
+  var ev=document.getElementById('eff-veh');var savedEV=ev?ev.value:'';
+  c.innerHTML='<div class="toolbar"><span style="font-size:.82rem;color:var(--tx2);font-weight:500">Filter:</span><input type="date" id="eff-from" value="'+savedEF+'" onchange="renderEfficiency()"><span style="color:var(--tx3);font-size:.82rem">to</span><input type="date" id="eff-to" value="'+savedET+'" onchange="renderEfficiency()"><select id="eff-veh" onchange="renderEfficiency()"><option value="">All Vehicles</option>'+vh.replace(/value="(\d+)"/g,function(m,id){return 'value="'+id+'"'+(id===savedEV?' selected':'');})+'</select><button class="btn btn-s btn-sm" onclick="document.getElementById(\'eff-from\').value=\'\';document.getElementById(\'eff-to\').value=\'\';document.getElementById(\'eff-veh\').value=\'\';renderEfficiency()">Clear</button></div><div id="eff-content"><div class="page-loading"><div class="spinner"></div></div></div>';
+  var qp='';var qparts=[];if(savedEF)qparts.push('date_from='+savedEF);if(savedET)qparts.push('date_to='+savedET);if(savedEV)qparts.push('vehicle_id='+savedEV);if(qparts.length)qp='?'+qparts.join('&');
+  var data;try{data=await get('/fuel-efficiency'+qp);}catch(e){document.getElementById('eff-content').innerHTML='<div class="empty-state"><p>Error: '+esc(e.message)+'</p></div>';return;}
+  var f=data.fleet||{};var vehicles=data.vehicles||[];var monthly=data.monthly||[];
+  var h='<div class="stat-grid" style="margin-bottom:20px">';
+  h+='<div class="stat-card sc-blue"><div class="stat-icon">&#128261;</div><div class="stat-label">Total Distance</div><div class="stat-value blue">'+Number(f.total_km||0).toLocaleString()+' km</div></div>';
+  h+='<div class="stat-card sc-amber"><div class="stat-icon">&#9981;</div><div class="stat-label">Fuel Consumed</div><div class="stat-value">'+fmt(f.total_litres,1)+' L</div></div>';
+  h+='<div class="stat-card sc-green"><div class="stat-icon">&#128202;</div><div class="stat-label">Fleet Efficiency</div><div class="stat-value accent">'+(f.km_per_litre||0)+' km/L</div><div class="stat-sub">'+(f.litres_per_100km||0)+' L/100km</div></div>';
+  h+='<div class="stat-card sc-red"><div class="stat-icon">&#128176;</div><div class="stat-label">Cost per KM</div><div class="stat-value danger">GH\u20B5'+fmt(f.cost_per_km,2)+'</div><div class="stat-sub">Total: GH\u20B5'+fmt(f.total_cost)+'</div></div>';
+  h+='</div>';
+  // Monthly trend chart
+  if(monthly.length){
+    var mx=Math.max.apply(null,monthly.map(function(m){return Number(m.km_per_litre||0);}));
+    h+='<div class="card" style="margin-bottom:20px"><div class="card-header"><span>&#128200; Monthly Efficiency Trend</span></div><div class="card-body"><div class="chart-bar-group">';
+    monthly.forEach(function(m){var kpl=Number(m.km_per_litre||0);var p=mx>0?(kpl/mx*100):0;h+='<div class="chart-bar" style="height:'+Math.max(p,3)+'%;background:linear-gradient(180deg,var(--ac2),rgba(56,189,248,.4))"><div class="chart-tooltip">'+kpl+' km/L<br>'+Number(m.km||0).toLocaleString()+' km<br>'+fmt(m.litres,0)+' L</div></div>';});
+    h+='</div><div class="chart-labels">';monthly.forEach(function(m){h+='<span>'+esc(m.month)+'</span>';});h+='</div></div></div>';
+  }
+  // Per-vehicle table
+  h+='<div class="card"><div class="card-header"><span>Per-Vehicle Performance</span></div><div class="card-body no-pad"><div class="table-wrap"><table><thead><tr><th>Vehicle</th><th style="text-align:right">Distance</th><th style="text-align:right">Litres</th><th style="text-align:right">Avg Cost/L</th><th style="text-align:right">km/L</th><th style="text-align:right">L/100km</th><th style="text-align:right">Cost/km</th><th style="text-align:right">Trips</th><th style="text-align:right">Total Cost</th></tr></thead><tbody>';
+  if(vehicles.length){
+    // Find best/worst for highlighting
+    var validKpl=vehicles.filter(function(v){return v.km_per_litre!=null;});
+    var bestKpl=validKpl.length?Math.max.apply(null,validKpl.map(function(v){return v.km_per_litre;})):0;
+    var worstKpl=validKpl.length?Math.min.apply(null,validKpl.map(function(v){return v.km_per_litre;})):0;
+    vehicles.forEach(function(v){
+      var label=(v.registration?esc(v.registration)+' \u2014 ':'')+esc(v.unit_number)+' <span style="color:var(--tx3);font-size:.78rem">('+esc(v.make||'')+' '+esc(v.model||'')+')</span>';
+      var kplCell=v.km_per_litre==null?'<span style="color:var(--tx3)">\u2014</span>':v.km_per_litre===bestKpl&&validKpl.length>1?'<span style="color:var(--ac);font-weight:700">'+v.km_per_litre+' \u2191</span>':v.km_per_litre===worstKpl&&validKpl.length>1?'<span style="color:var(--dn);font-weight:700">'+v.km_per_litre+' \u2193</span>':v.km_per_litre;
+      h+='<tr><td class="cp">'+label+'</td><td class="cm" style="text-align:right">'+(v.total_km?Number(v.total_km).toLocaleString():'\u2014')+'</td><td class="cm" style="text-align:right">'+(v.total_litres?fmt(v.total_litres,1):'\u2014')+'</td><td class="cm" style="text-align:right">'+(v.cost_per_litre_avg?'GH\u20B5'+fmt(v.cost_per_litre_avg):'\u2014')+'</td><td class="cm" style="text-align:right">'+kplCell+'</td><td class="cm" style="text-align:right">'+(v.litres_per_100km!=null?v.litres_per_100km:'\u2014')+'</td><td class="cm" style="text-align:right">'+(v.cost_per_km!=null?'GH\u20B5'+fmt(v.cost_per_km):'\u2014')+'</td><td style="text-align:right">'+v.trip_count+'</td><td class="cm" style="text-align:right;font-weight:600">GH\u20B5'+fmt(v.total_fuel_cost)+'</td></tr>';
+    });
+  }else{h+='<tr><td colspan="9"><div class="empty-state"><p>No data</p></div></td></tr>';}
+  h+='</tbody></table></div></div></div>';
+  // Insights box
+  if(vehicles.length){
+    var insights=[];
+    var validVehicles=vehicles.filter(function(v){return v.km_per_litre!=null;});
+    if(validVehicles.length>1){
+      var sorted=validVehicles.slice().sort(function(a,b){return b.km_per_litre-a.km_per_litre;});
+      var best=sorted[0];var worst=sorted[sorted.length-1];
+      insights.push('Most efficient: <strong>'+((best.registration?best.registration+' / ':'')+best.unit_number)+'</strong> at '+best.km_per_litre+' km/L');
+      insights.push('Least efficient: <strong>'+((worst.registration?worst.registration+' / ':'')+worst.unit_number)+'</strong> at '+worst.km_per_litre+' km/L');
+      var diff=Math.round((best.km_per_litre-worst.km_per_litre)/worst.km_per_litre*100);
+      if(diff>20)insights.push('Performance gap: <strong>'+diff+'%</strong> difference between best and worst \u2014 worth investigating maintenance, driving patterns, or load profiles.');
+    }
+    var noData=vehicles.filter(function(v){return v.km_per_litre==null&&(v.total_km>0||v.total_litres>0);});
+    if(noData.length)insights.push(noData.length+' vehicle(s) missing either trip distance or fuel data \u2014 efficiency cannot be calculated. Ensure odometer readings are logged on trips and fuel purchases.');
+    if(insights.length){h+='<div class="card" style="margin-top:16px"><div class="card-header"><span>&#128161; Insights</span></div><div class="card-body"><ul style="margin:0;padding-left:20px;line-height:1.8">';insights.forEach(function(i){h+='<li>'+i+'</li>';});h+='</ul></div></div>';}
+  }
+  document.getElementById('eff-content').innerHTML=h;
+}
 async function loadTrips(){var ps=new URLSearchParams();var flds=[['vehicle_id','tr-v'],['project_id','tr-p'],['date_from','tr-f'],['date_to','tr-t']];flds.forEach(function(f){var el=document.getElementById(f[1]);if(el&&el.value)ps.set(f[0],el.value);});var data=await get('/trips?'+ps);var el=document.getElementById('tr-tbl');if(!data.length){el.innerHTML='<div class="empty-state"><div class="empty-icon">&#128506;&#65039;</div><p>No trips</p></div>';return;}var h='<table><thead><tr><th>Date</th><th>Vehicle</th><th>Driver</th><th>Route</th><th>Purpose</th><th>Distance</th><th>Project</th><th></th></tr></thead><tbody>';data.forEach(function(t){h+='<tr><td>'+fmtD(t.trip_date)+'</td><td class="cp">'+esc(t.registration||t.unit_number)+'</td><td>'+esc(t.driver_name||'\u2014')+'</td><td>'+esc(t.origin||'?')+' \u2192 '+esc(t.destination||'?')+'</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.purpose)+'</td><td class="cm">'+(t.distance?t.distance.toLocaleString()+' km':'\u2014')+'</td><td>'+esc(t.project_name||'\u2014')+'</td><td class="ca"><button class="btn btn-d btn-sm" onclick="deleteTrip('+t.id+')">Del</button></td></tr>';});h+='</tbody></table>';el.innerHTML=h;}
 async function openTripForm(){openModal('Log Trip','<form id="tf"><div class="fr"><div class="fg"><label>Vehicle *</label><select name="vehicle_id" required>'+sopts(LK.vehicles,'id',function(v){return (v.registration?v.registration+' \u2014 ':'')+v.unit_number;})+'</select></div><div class="fg"><label>Driver</label><select name="driver_id">'+sopts(LK.drivers,'id',function(d){return d.first_name+' '+d.last_name;})+'</select></div></div><div class="fr3"><div class="fg"><label>Date *</label><input name="trip_date" type="date" value="'+new Date().toISOString().slice(0,10)+'" required></div><div class="fg"><label>Depart</label><input name="departure_time" type="time"></div><div class="fg"><label>Return</label><input name="return_time" type="time"></div></div><div class="fr"><div class="fg"><label>Origin</label><input name="origin"></div><div class="fg"><label>Destination</label><input name="destination"></div></div><div class="fg"><label>Purpose *</label><input name="purpose" required></div><div class="fr3"><div class="fg"><label>Odo Start</label><input name="odometer_start" type="number"></div><div class="fg"><label>Odo End</label><input name="odometer_end" type="number"></div><div class="fg"><label>Passengers</label><input name="passengers" type="number" value="0"></div></div><div class="fr"><div class="fg"><label>Project</label><select name="project_id">'+sopts(LK.projects,'id','name')+'</select></div><div class="fg"><label>Notes</label><input name="notes"></div></div></form>','<button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" onclick="saveTrip()">Save</button>',true);}
 async function saveTrip(){var fd=new FormData(document.getElementById('tf'));var d={};for(var p of fd.entries()){var k=p[0],v=p[1];if(['vehicle_id','driver_id','project_id','odometer_start','odometer_end','passengers'].indexOf(k)>=0)d[k]=v?parseInt(v):null;else d[k]=v||null;}if(!d.vehicle_id){toast('Vehicle required','error');return;}try{await post('/trips',d);toast('Trip logged');closeModal();loadTrips();}catch(e){toast(e.message,'error');}}
@@ -660,6 +718,50 @@ async function loadRpt(type,btn){
     h+='<tr style="background:var(--sf2)"><td style="border:2px solid var(--tx);padding:8px 12px;font-weight:700">Closing Balance (c/f)</td><td style="border:2px solid var(--tx);padding:8px 12px;text-align:right;font-family:var(--mono);font-weight:700;text-decoration:double underline">'+fmt(closingBal)+'</td></tr>';
     h+='</tbody></table></div>';el.innerHTML=h;
   }
+}
+
+// ======= AUDIT LOG =======
+async function renderAudit(){
+  if(USER.role!=='admin'){document.getElementById('mc').innerHTML='<div class="empty-state"><p>Admin required</p></div>';return;}
+  var mc=document.getElementById('mc');
+  // Read existing filter values
+  var savedT=document.getElementById('au-table');savedT=savedT?savedT.value:'';
+  var savedA=document.getElementById('au-action');savedA=savedA?savedA.value:'';
+  var savedF=document.getElementById('au-from');savedF=savedF?savedF.value:'';
+  var savedTo=document.getElementById('au-to');savedTo=savedTo?savedTo.value:'';
+  var qparts=[];
+  if(savedT)qparts.push('table='+savedT);
+  if(savedA)qparts.push('action='+savedA);
+  if(savedF)qparts.push('date_from='+savedF);
+  if(savedTo)qparts.push('date_to='+savedTo);
+  var qp=qparts.length?'?'+qparts.join('&'):'';
+  var h='<div class="page-header"><div><h2>Audit Log</h2><div class="subtitle">All system changes \u2014 who did what and when</div></div><div class="header-actions"><button class="btn btn-print btn-sm" onclick="printPage()">&#128424; Print</button><button class="btn btn-export btn-sm" onclick="exportCSV(\'audit_log.csv\')">&#128229; Export</button></div></div>';
+  h+='<div class="toolbar"><select id="au-table" onchange="renderAudit()"><option value="">All Tables</option>';
+  ['vehicles','drivers','fuel_cards','fuel_transactions','trips','maintenance_records','insurance_records','roadworthy_records','vendors','projects','users'].forEach(function(t){h+='<option value="'+t+'"'+(t===savedT?' selected':'')+'>'+t+'</option>';});
+  h+='</select><select id="au-action" onchange="renderAudit()"><option value="">All Actions</option>';
+  ['CREATE','UPDATE','DELETE','DEACTIVATE','BALANCE_ADJUST','TOPUP'].forEach(function(a){h+='<option value="'+a+'"'+(a===savedA?' selected':'')+'>'+a+'</option>';});
+  h+='</select><input type="date" id="au-from" value="'+savedF+'" onchange="renderAudit()"><input type="date" id="au-to" value="'+savedTo+'" onchange="renderAudit()"><button class="btn btn-s btn-sm" onclick="document.getElementById(\'au-table\').value=\'\';document.getElementById(\'au-action\').value=\'\';document.getElementById(\'au-from\').value=\'\';document.getElementById(\'au-to\').value=\'\';renderAudit()">Clear</button></div>';
+  h+='<div class="card"><div class="card-body no-pad"><div class="table-wrap" id="au-tbl"><div class="page-loading"><div class="spinner"></div></div></div></div></div>';
+  mc.innerHTML+=h;
+  var data;
+  try{data=await get('/audit-log'+qp);}catch(e){document.getElementById('au-tbl').innerHTML='<div class="empty-state"><p>Error: '+esc(e.message)+'</p></div>';return;}
+  var t='<table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Table</th><th>Record</th><th>Details</th></tr></thead><tbody>';
+  if(!data.length){t+='<tr><td colspan="6"><div class="empty-state"><p>No audit entries</p></div></td></tr>';}
+  else{
+    data.forEach(function(a){
+      var actBadge=a.action==='CREATE'?'bg':a.action==='DELETE'||a.action==='DEACTIVATE'?'br':a.action==='BALANCE_ADJUST'||a.action==='TOPUP'?'by':'bb';
+      var userLabel=a.username?(a.first_name?esc(a.first_name)+' '+esc(a.last_name||''):esc(a.username)):'\u2014';
+      var details='';
+      if(a.action==='BALANCE_ADJUST'&&a.new_values)details='Adjusted by GH\u20B5'+(a.new_values.adjustment||0)+' to GH\u20B5'+(a.new_values.new_balance||0);
+      else if(a.action==='TOPUP'&&a.new_values)details='Top-up GH\u20B5'+(a.new_values.amount||0)+(a.new_values.reference?' \u2014 '+esc(a.new_values.reference):'');
+      else if(a.action==='UPDATE'){var oldv=a.old_values||{};var newv=a.new_values||{};var changes=[];Object.keys(newv).forEach(function(k){if(JSON.stringify(oldv[k])!==JSON.stringify(newv[k])&&k!=='updated_at')changes.push(k);});details=changes.length?'Changed: '+changes.slice(0,3).join(', ')+(changes.length>3?' +'+(changes.length-3)+' more':''):'No changes';}
+      else if(a.action==='CREATE'&&a.new_values){var name=a.new_values.unit_number||a.new_values.card_number||a.new_values.first_name||a.new_values.name||a.new_values.transaction_type||'';details='New: '+esc(name);}
+      else if((a.action==='DELETE'||a.action==='DEACTIVATE')&&a.old_values){var oname=a.old_values.unit_number||a.old_values.card_number||a.old_values.first_name||a.old_values.name||a.old_values.transaction_type||'';details='Removed: '+esc(oname);}
+      t+='<tr><td>'+fmtDT(a.created_at)+'</td><td class="cp">'+userLabel+'</td><td><span class="badge '+actBadge+'">'+esc(a.action)+'</span></td><td class="cm">'+esc(a.table_name)+'</td><td class="cm">#'+(a.record_id||'\u2014')+'</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">'+details+'</td></tr>';
+    });
+  }
+  t+='</tbody></table>';
+  document.getElementById('au-tbl').innerHTML=t;
 }
 
 // ======= USERS =======
