@@ -2,7 +2,9 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
-import psycopg, psycopg.rows, os, jwt, bcrypt
+import psycopg, psycopg.rows, os, jwt, bcrypt, json
+from psycopg_pool import ConnectionPool
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel
@@ -16,27 +18,85 @@ app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=True,all
 security = HTTPBearer()
 frontend_path = os.path.join(os.path.dirname(__file__),'..','frontend')
 
-def get_conn():
-    return psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row)
+# ── Connection Pool ──────────────────────────────────────────────────────────
+# Reuses connections instead of opening/closing on every request.
+# min_size=2 keeps connections warm; max_size=10 caps concurrent connections.
+pool = ConnectionPool(
+    DATABASE_URL,
+    min_size=2,
+    max_size=10,
+    kwargs={"row_factory": psycopg.rows.dict_row},
+    open=True,
+)
 
+@app.on_event("shutdown")
+def close_pool():
+    pool.close()
+
+# ── Audit Logging ────────────────────────────────────────────────────────────
+# Tracks who changed what and when. Stored in audit_log table.
+# Set via middleware in get_current_user (request context).
+_request_user = {}
+
+def _set_audit_user(uid):
+    _request_user["uid"] = uid
+
+def audit_log(table_name, record_id, action, old_values=None, new_values=None, user_id=None):
+    """Append-only log of all data mutations. Failures here must not break the main operation."""
+    try:
+        uid = user_id or _request_user.get("uid")
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO audit_log (table_name, record_id, action, old_values, new_values, user_id, created_at) VALUES (%s,%s,%s,%s,%s,%s,NOW())",
+                    (table_name, record_id, action,
+                     json.dumps(old_values, default=str) if old_values else None,
+                     json.dumps(new_values, default=str) if new_values else None,
+                     uid)
+                )
+                conn.commit()
+    except Exception as e:
+        # Never let audit failures break operations - just log to stderr
+        print(f"[AUDIT FAIL] {table_name}/{record_id}/{action}: {e}")
+
+# ── Query helpers (use pool) ─────────────────────────────────────────────────
 def query(sql, params=None):
-    with get_conn() as conn:
+    with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
             return cur.fetchall()
 
 def query_one(sql, params=None):
-    with get_conn() as conn:
+    with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
             return cur.fetchone()
 
 def execute(sql, params=None):
-    with get_conn() as conn:
+    with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
-            try: result=cur.fetchone(); conn.commit(); return result
-            except: conn.commit(); return None
+            try:
+                result = cur.fetchone()
+                conn.commit()
+                return result
+            except:
+                conn.commit()
+                return None
+
+# ── Transaction context manager ──────────────────────────────────────────────
+# Use for multi-step operations (fuel transactions, edits) so all-or-nothing.
+@contextmanager
+def transaction():
+    """Yields a cursor inside a transaction. Auto-commits on success, rolls back on exception."""
+    with pool.connection() as conn:
+        try:
+            with conn.cursor() as cur:
+                yield cur
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 def create_token(uid, role):
     return jwt.encode({"sub":str(uid),"role":role,"exp":datetime.utcnow()+timedelta(hours=24)},JWT_SECRET,algorithm="HS256")
@@ -44,7 +104,9 @@ def create_token(uid, role):
 def get_current_user(credentials:HTTPAuthorizationCredentials=Depends(security)):
     try:
         p=jwt.decode(credentials.credentials,JWT_SECRET,algorithms=["HS256"])
-        return {"id":int(p["sub"]),"role":p["role"]}
+        user = {"id":int(p["sub"]),"role":p["role"]}
+        _set_audit_user(user["id"])
+        return user
     except: raise HTTPException(status_code=401,detail="Invalid token")
 
 def require_admin(user=Depends(get_current_user)):
@@ -238,10 +300,12 @@ def create_vehicle(data:VehicleCreate,user=Depends(get_current_user)):
          data.purchase_date,data.purchase_cost,data.purchase_vendor_id,data.insurance_policy,data.insurance_vendor_id,
          data.insurance_expiry,data.insurance_cost,data.roadworthy_number,data.roadworthy_expiry,data.roadworthy_cost,data.notes,data.photo_url))
     _refresh_vehicle_reminders(row["id"])
+    audit_log("vehicles", row["id"], "CREATE", new_values=data.dict(), user_id=user["id"])
     return {"id":row["id"],"message":"Vehicle created"}
 
 @app.put("/api/vehicles/{vid}")
 def update_vehicle(vid:int,data:VehicleCreate,user=Depends(get_current_user)):
+    old = query_one("SELECT * FROM vehicles WHERE id=%s", (vid,))
     execute("""UPDATE vehicles SET unit_number=%s,registration=%s,vin=%s,make=%s,model=%s,year=%s,color=%s,
         engine_number=%s,vehicle_type_id=%s,fuel_type_id=%s,department_id=%s,group_id=%s,tank_capacity=%s,
         insurance_policy=%s,insurance_vendor_id=%s,insurance_expiry=%s,insurance_cost=%s,
@@ -251,11 +315,15 @@ def update_vehicle(vid:int,data:VehicleCreate,user=Depends(get_current_user)):
          data.insurance_policy,data.insurance_vendor_id,data.insurance_expiry,data.insurance_cost,
          data.roadworthy_number,data.roadworthy_expiry,data.roadworthy_cost,data.notes,data.photo_url,vid))
     _refresh_vehicle_reminders(vid)
+    audit_log("vehicles", vid, "UPDATE", old_values=old, new_values=data.dict(), user_id=user["id"])
     return {"message":"Updated"}
 
 @app.delete("/api/vehicles/{vid}")
 def delete_vehicle(vid:int,user=Depends(get_current_user)):
-    execute("UPDATE vehicles SET is_active=false WHERE id=%s",(vid,)); return {"message":"Deactivated"}
+    old = query_one("SELECT * FROM vehicles WHERE id=%s", (vid,))
+    execute("UPDATE vehicles SET is_active=false WHERE id=%s",(vid,))
+    audit_log("vehicles", vid, "DEACTIVATE", old_values=old, user_id=user["id"])
+    return {"message":"Deactivated"}
 
 def _refresh_vehicle_reminders(vid):
     v=query_one("SELECT * FROM vehicles WHERE id=%s",(vid,))
@@ -354,17 +422,24 @@ class BalanceAdjust(BaseModel):
  
 @app.put("/api/fuel-cards/{cid}/adjust-balance")
 def adjust_balance(cid: int, data: BalanceAdjust, user=Depends(get_current_user)):
+    old_card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
     execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
             (data.amount, cid))
     card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
     if card:
         _check_card_balance(card)
+    audit_log("fuel_cards", cid, "BALANCE_ADJUST",
+              old_values={"current_balance": float(old_card.get("current_balance") or 0)} if old_card else None,
+              new_values={"adjustment": data.amount, "new_balance": float(card.get("current_balance", 0)) if card else 0},
+              user_id=user["id"])
     return {"message": "Balance adjusted", "new_balance": float(card.get("current_balance", 0)) if card else 0}
  
 # Soft-delete fuel card
 @app.delete("/api/fuel-cards/{cid}")
 def delete_fuel_card(cid: int, user=Depends(get_current_user)):
+    old = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
     execute("UPDATE fuel_cards SET is_active=false WHERE id=%s", (cid,))
+    audit_log("fuel_cards", cid, "DEACTIVATE", old_values=old, user_id=user["id"])
     return {"message": "Deactivated"}
 
 # Recalculate balance from initial_balance + all transactions (fixes corrupted balances)
@@ -417,64 +492,73 @@ def get_fuel_tx(vehicle_id:Optional[int]=None,date_from:Optional[str]=None,date_
 
 @app.post("/api/fuel-transactions",status_code=201)
 def create_fuel_tx(data:FuelTxCreate,user=Depends(get_current_user)):
-    row=execute("""INSERT INTO fuel_transactions (transaction_date,transaction_type,vehicle_id,driver_id,
-        fuel_card_id,transfer_to_card_id,fuel_type_id,vendor_id,project_id,location,trip_purpose,
-        odometer_start,odometer_end,litres,cost_per_litre,total_cost,invoice_number,reference,is_full_tank,created_by)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-        (data.transaction_date,data.transaction_type,data.vehicle_id,data.driver_id,
-         data.fuel_card_id,data.transfer_to_card_id,data.fuel_type_id,data.vendor_id,
-         data.project_id,data.location,data.trip_purpose,data.odometer_start,data.odometer_end,
-         data.litres,data.cost_per_litre,data.total_cost,data.invoice_number,data.reference,
-         data.is_full_tank,f"user_{user['id']}"))
-    if data.odometer_end and data.vehicle_id:
-        execute("UPDATE vehicles SET current_odometer=%s,updated_at=NOW() WHERE id=%s AND current_odometer<%s",
-                (data.odometer_end,data.vehicle_id,data.odometer_end))
-    # ── Card balance logic (accounting rules) ──
-    if data.transaction_type == "purchase" and data.fuel_card_id and data.total_cost:
-        # PURCHASE: Deduct from card → this IS an expense
-        execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
-                (data.total_cost, data.fuel_card_id))
+    # All writes in one atomic transaction — if any step fails, all rollback
+    with transaction() as cur:
+        cur.execute("""INSERT INTO fuel_transactions (transaction_date,transaction_type,vehicle_id,driver_id,
+            fuel_card_id,transfer_to_card_id,fuel_type_id,vendor_id,project_id,location,trip_purpose,
+            odometer_start,odometer_end,litres,cost_per_litre,total_cost,invoice_number,reference,is_full_tank,created_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (data.transaction_date,data.transaction_type,data.vehicle_id,data.driver_id,
+             data.fuel_card_id,data.transfer_to_card_id,data.fuel_type_id,data.vendor_id,
+             data.project_id,data.location,data.trip_purpose,data.odometer_start,data.odometer_end,
+             data.litres,data.cost_per_litre,data.total_cost,data.invoice_number,data.reference,
+             data.is_full_tank,f"user_{user['id']}"))
+        new_id = cur.fetchone()["id"]
+        if data.odometer_end and data.vehicle_id:
+            cur.execute("UPDATE vehicles SET current_odometer=%s,updated_at=NOW() WHERE id=%s AND current_odometer<%s",
+                    (data.odometer_end,data.vehicle_id,data.odometer_end))
+        # Card balance updates (atomic with the INSERT above)
+        if data.transaction_type == "purchase" and data.fuel_card_id and data.total_cost:
+            cur.execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
+                    (data.total_cost, data.fuel_card_id))
+        elif data.transaction_type == "topup" and data.fuel_card_id and data.total_cost:
+            cur.execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+                    (data.total_cost, data.fuel_card_id))
+        elif data.transaction_type == "transfer" and data.fuel_card_id and data.transfer_to_card_id and data.total_cost:
+            cur.execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
+                    (data.total_cost, data.fuel_card_id))
+            cur.execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+                    (data.total_cost, data.transfer_to_card_id))
+    # After commit, run low-balance reminder check (non-critical, outside transaction)
+    if data.transaction_type == "purchase" and data.fuel_card_id:
         card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (data.fuel_card_id,))
         if card: _check_card_balance(card)
-    elif data.transaction_type == "transfer" and data.fuel_card_id and data.transfer_to_card_id and data.total_cost:
-        # TRANSFER: Move cash from Card A to Card B → NOT an expense, just rebalancing
-        # Deduct from source card
-        execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
-                (data.total_cost, data.fuel_card_id))
-        # Add to destination card
-        execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
-                (data.total_cost, data.transfer_to_card_id))
-        # Check both cards for low balance
-        src = query_one("SELECT * FROM fuel_cards WHERE id=%s", (data.fuel_card_id,))
-        if src: _check_card_balance(src)
-        dst = query_one("SELECT * FROM fuel_cards WHERE id=%s", (data.transfer_to_card_id,))
-        if dst: _check_card_balance(dst)
-    return {"id":row["id"],"message":"Transaction recorded"}
+    elif data.transaction_type == "transfer":
+        if data.fuel_card_id:
+            src = query_one("SELECT * FROM fuel_cards WHERE id=%s", (data.fuel_card_id,))
+            if src: _check_card_balance(src)
+        if data.transfer_to_card_id:
+            dst = query_one("SELECT * FROM fuel_cards WHERE id=%s", (data.transfer_to_card_id,))
+            if dst: _check_card_balance(dst)
+    # Audit log
+    audit_log("fuel_transactions", new_id, "CREATE", new_values=data.dict(), user_id=user["id"])
+    return {"id":new_id,"message":"Transaction recorded"}
 
 @app.delete("/api/fuel-transactions/{tid}")
 def delete_fuel_tx(tid:int,user=Depends(get_current_user)):
-    # Reverse balance effect before deleting
+    # Capture original state for audit
     tx = query_one("SELECT * FROM fuel_transactions WHERE id=%s", (tid,))
-    if tx and tx.get("total_cost"):
-        amt = float(tx["total_cost"])
-        if tx["transaction_type"] == "purchase" and tx.get("fuel_card_id"):
-            # Purchase had deducted, so add back
-            execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
-                    (amt, tx["fuel_card_id"]))
-        elif tx["transaction_type"] == "topup" and tx.get("fuel_card_id"):
-            # Topup had added, so subtract back
-            execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
-                    (amt, tx["fuel_card_id"]))
-        elif tx["transaction_type"] == "transfer":
-            if tx.get("fuel_card_id"):
-                # Transfer had deducted from source, add back
-                execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+    if not tx:
+        raise HTTPException(404, "Transaction not found")
+    # All reversals + delete in one atomic transaction
+    with transaction() as cur:
+        if tx.get("total_cost"):
+            amt = float(tx["total_cost"])
+            if tx["transaction_type"] == "purchase" and tx.get("fuel_card_id"):
+                cur.execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
                         (amt, tx["fuel_card_id"]))
-            if tx.get("transfer_to_card_id"):
-                # Transfer had added to dest, subtract back
-                execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
-                        (amt, tx["transfer_to_card_id"]))
-    execute("DELETE FROM fuel_transactions WHERE id=%s",(tid,))
+            elif tx["transaction_type"] == "topup" and tx.get("fuel_card_id"):
+                cur.execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
+                        (amt, tx["fuel_card_id"]))
+            elif tx["transaction_type"] == "transfer":
+                if tx.get("fuel_card_id"):
+                    cur.execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+                            (amt, tx["fuel_card_id"]))
+                if tx.get("transfer_to_card_id"):
+                    cur.execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
+                            (amt, tx["transfer_to_card_id"]))
+        cur.execute("DELETE FROM fuel_transactions WHERE id=%s", (tid,))
+    audit_log("fuel_transactions", tid, "DELETE", old_values=tx, user_id=user["id"])
     return {"message":"Deleted"}
 
 # ── Trips ─────────────────────────────────────────────────────────────────────
@@ -508,6 +592,100 @@ def create_trip(data:TripCreate,user=Depends(get_current_user)):
 @app.delete("/api/trips/{tid}")
 def delete_trip(tid:int,user=Depends(get_current_user)):
     execute("DELETE FROM trips WHERE id=%s",(tid,)); return {"message":"Deleted"}
+
+@app.get("/api/fuel-efficiency")
+def fuel_efficiency(vehicle_id:Optional[int]=None,date_from:Optional[str]=None,
+                    date_to:Optional[str]=None,user=Depends(get_current_user)):
+    # Build trip filters
+    trip_filter=""
+    fuel_filter=""
+    trip_params=[]
+    fuel_params=[]
+    if vehicle_id:
+        trip_filter+=" AND t.vehicle_id=%s"
+        fuel_filter+=" AND ft.vehicle_id=%s"
+        trip_params.append(vehicle_id)
+        fuel_params.append(vehicle_id)
+    if date_from:
+        trip_filter+=" AND t.trip_date>=%s"
+        fuel_filter+=" AND ft.transaction_date>=%s"
+        trip_params.append(date_from)
+        fuel_params.append(date_from)
+    if date_to:
+        trip_filter+=" AND t.trip_date<=%s"
+        fuel_filter+=" AND ft.transaction_date<=%s"
+        trip_params.append(date_to)
+        fuel_params.append(date_to)
+    
+    # Per-vehicle efficiency aggregation
+    rows = query("""
+        SELECT v.id, v.unit_number, v.registration, v.make, v.model, v.tank_capacity,
+               COALESCE((SELECT SUM(t.distance) FROM trips t WHERE t.vehicle_id=v.id"""+trip_filter+"""),0) AS total_km,
+               COALESCE((SELECT COUNT(*) FROM trips t WHERE t.vehicle_id=v.id"""+trip_filter+"""),0) AS trip_count,
+               COALESCE((SELECT SUM(ft.litres) FROM fuel_transactions ft WHERE ft.vehicle_id=v.id AND ft.transaction_type='purchase'"""+fuel_filter+"""),0) AS total_litres,
+               COALESCE((SELECT SUM(ft.total_cost) FROM fuel_transactions ft WHERE ft.vehicle_id=v.id AND ft.transaction_type='purchase'"""+fuel_filter+"""),0) AS total_fuel_cost,
+               COALESCE((SELECT COUNT(*) FROM fuel_transactions ft WHERE ft.vehicle_id=v.id AND ft.transaction_type='purchase'"""+fuel_filter+"""),0) AS fuel_count
+        FROM vehicles v
+        WHERE v.is_active=true
+        ORDER BY v.unit_number
+    """, trip_params+trip_params+fuel_params+fuel_params+fuel_params)
+    
+    # Compute efficiency metrics per row
+    for r in rows:
+        km = float(r.get("total_km") or 0)
+        litres = float(r.get("total_litres") or 0)
+        cost = float(r.get("total_fuel_cost") or 0)
+        r["km_per_litre"] = round(km / litres, 2) if litres > 0 else None
+        r["litres_per_100km"] = round((litres / km) * 100, 2) if km > 0 else None
+        r["cost_per_km"] = round(cost / km, 2) if km > 0 else None
+        r["cost_per_litre_avg"] = round(cost / litres, 2) if litres > 0 else None
+    
+    # Fleet totals
+    fleet_km = sum(float(r.get("total_km") or 0) for r in rows)
+    fleet_litres = sum(float(r.get("total_litres") or 0) for r in rows)
+    fleet_cost = sum(float(r.get("total_fuel_cost") or 0) for r in rows)
+    fleet_kpl = round(fleet_km / fleet_litres, 2) if fleet_litres > 0 else 0
+    fleet_l100 = round((fleet_litres / fleet_km) * 100, 2) if fleet_km > 0 else 0
+    fleet_cpk = round(fleet_cost / fleet_km, 2) if fleet_km > 0 else 0
+    
+    # Monthly trend (last 6 months for the filtered set)
+    monthly_filter=""
+    monthly_params=[]
+    if vehicle_id:
+        monthly_filter+=" AND vehicle_id=%s"
+        monthly_params.append(vehicle_id)
+    monthly = query("""
+        SELECT TO_CHAR(DATE_TRUNC('month', m.month_date),'Mon YY') AS month,
+               COALESCE(SUM(m.distance),0) AS km,
+               COALESCE(SUM(m.litres),0) AS litres,
+               COALESCE(SUM(m.fuel_cost),0) AS fuel_cost
+        FROM (
+            SELECT trip_date AS month_date, distance, 0 AS litres, 0 AS fuel_cost
+            FROM trips WHERE trip_date >= NOW()-INTERVAL '6 months' """+monthly_filter+"""
+            UNION ALL
+            SELECT transaction_date::date AS month_date, 0 AS distance, litres, total_cost
+            FROM fuel_transactions WHERE transaction_type='purchase' AND transaction_date >= NOW()-INTERVAL '6 months' """+monthly_filter+"""
+        ) m
+        GROUP BY DATE_TRUNC('month', m.month_date)
+        ORDER BY DATE_TRUNC('month', m.month_date)
+    """, monthly_params + monthly_params)
+    for m in monthly:
+        km = float(m.get("km") or 0)
+        litres = float(m.get("litres") or 0)
+        m["km_per_litre"] = round(km / litres, 2) if litres > 0 else None
+    
+    return {
+        "vehicles": rows,
+        "fleet": {
+            "total_km": fleet_km,
+            "total_litres": fleet_litres,
+            "total_cost": fleet_cost,
+            "km_per_litre": fleet_kpl,
+            "litres_per_100km": fleet_l100,
+            "cost_per_km": fleet_cpk
+        },
+        "monthly": monthly
+    }
 
 # ── Maintenance ───────────────────────────────────────────────────────────────
 @app.get("/api/maintenance")
@@ -649,6 +827,22 @@ def update_project(pid:int,data:ProjectCreate,user=Depends(get_current_user)):
 @app.get("/api/users")
 def get_users(user=Depends(require_admin)):
     return query("SELECT id,username,email,first_name,last_name,role,is_active,last_login,created_at FROM users ORDER BY first_name")
+
+# ── Audit Log (admin only) ────────────────────────────────────────────────────
+@app.get("/api/audit-log")
+def get_audit_log(table:Optional[str]=None,action:Optional[str]=None,user_id:Optional[int]=None,
+                  date_from:Optional[str]=None,date_to:Optional[str]=None,
+                  limit:int=100,user=Depends(require_admin)):
+    sql="""SELECT a.*, u.username, u.first_name, u.last_name
+           FROM audit_log a LEFT JOIN users u ON u.id=a.user_id WHERE 1=1"""
+    params=[]
+    if table: sql+=" AND a.table_name=%s"; params.append(table)
+    if action: sql+=" AND a.action=%s"; params.append(action)
+    if user_id: sql+=" AND a.user_id=%s"; params.append(user_id)
+    if date_from: sql+=" AND a.created_at>=%s"; params.append(date_from)
+    if date_to: sql+=" AND a.created_at<=%s"; params.append(date_to)
+    sql+=" ORDER BY a.created_at DESC LIMIT %s"; params.append(limit)
+    return query(sql, params)
 
 @app.post("/api/users",status_code=201)
 def create_user(data:UserCreate,user=Depends(require_admin)):
@@ -846,16 +1040,17 @@ class CardThreshold(BaseModel):
 
 @app.post("/api/fuel-cards/{cid}/topup")
 def topup_card(cid: int, data: CardTopup, user=Depends(get_current_user)):
-    execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
-            (data.amount, cid))
-    # Log as transaction
     dt = data.topup_date or datetime.now().isoformat()
-    execute("""INSERT INTO fuel_transactions (transaction_date, transaction_type, fuel_card_id, total_cost, litres, reference, created_by)
-               VALUES (%s, 'topup', %s, %s, 1, %s, %s)""",
-            (dt, cid, data.amount, data.reference or f"Top-up GH₵{data.amount}", f"user_{user['id']}"))
-    # Check threshold and create reminder if needed
+    with transaction() as cur:
+        cur.execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+                (data.amount, cid))
+        cur.execute("""INSERT INTO fuel_transactions (transaction_date, transaction_type, fuel_card_id, total_cost, litres, reference, created_by)
+                   VALUES (%s, 'topup', %s, %s, 1, %s, %s)""",
+                (dt, cid, data.amount, data.reference or f"Top-up GH₵{data.amount}", f"user_{user['id']}"))
+    # Post-commit: low balance check
     card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
     _check_card_balance(card)
+    audit_log("fuel_cards", cid, "TOPUP", new_values={"amount": data.amount, "reference": data.reference}, user_id=user["id"])
     return {"message": "Card topped up"}
 
 @app.put("/api/fuel-cards/{cid}/threshold")
