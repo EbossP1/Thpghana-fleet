@@ -1,9 +1,16 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
+# ═══════════════════════════════════════════════════════════════
+# REQUIREMENTS.TXT UPDATE
+# ═══════════════════════════════════════════════════════════════
+
 psycopg[binary]==3.2.1
-pyjwt==2.9.0
+psycopg-pool==3.2.2
+fastapi
+uvicorn
+python-jose[cryptography]
 bcrypt==4.0.1
-python-multipart==0.0.12
-pydantic==2.6.4
-python-dotenv==1.0.1
-gunicorn==22.0.0
+python-dotenv
+python-multipart
+PyJWT
+
+# The key new dependency is psycopg-pool which provides ConnectionPool.
+# It's a separate package from psycopg itself.
