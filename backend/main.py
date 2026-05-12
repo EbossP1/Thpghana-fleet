@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
 import psycopg, psycopg.rows, os, jwt, bcrypt, json
-from psycopg_pool import ConnectionPool
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Optional
@@ -18,20 +17,43 @@ app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=True,all
 security = HTTPBearer()
 frontend_path = os.path.join(os.path.dirname(__file__),'..','frontend')
 
-# ── Connection Pool ──────────────────────────────────────────────────────────
-# Reuses connections instead of opening/closing on every request.
-# min_size=2 keeps connections warm; max_size=10 caps concurrent connections.
-pool = ConnectionPool(
-    DATABASE_URL,
-    min_size=2,
-    max_size=10,
-    kwargs={"row_factory": psycopg.rows.dict_row},
-    open=True,
-)
+# ── Connection Pool (optional, falls back to direct connect if unavailable) ──
+pool = None
+try:
+    from psycopg_pool import ConnectionPool
+    pool = ConnectionPool(
+        DATABASE_URL,
+        min_size=1,
+        max_size=10,
+        kwargs={"row_factory": psycopg.rows.dict_row},
+        open=False,  # lazy open - don't crash startup if DB unreachable
+    )
+    pool.open(wait=False)  # don't block startup waiting for connections
+    print("[INFO] Connection pool initialized")
+except ImportError:
+    print("[WARN] psycopg_pool not installed, falling back to per-request connections")
+except Exception as e:
+    print(f"[WARN] Connection pool init failed, falling back to per-request: {e}")
+    pool = None
 
 @app.on_event("shutdown")
 def close_pool():
-    pool.close()
+    if pool is not None:
+        try: pool.close()
+        except: pass
+
+# Helper: yield a connection from pool or open one directly
+@contextmanager
+def get_conn():
+    if pool is not None:
+        with pool.connection() as conn:
+            yield conn
+    else:
+        conn = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row)
+        try:
+            yield conn
+        finally:
+            conn.close()
 
 # ── Audit Logging ────────────────────────────────────────────────────────────
 # Tracks who changed what and when. Stored in audit_log table.
@@ -45,7 +67,7 @@ def audit_log(table_name, record_id, action, old_values=None, new_values=None, u
     """Append-only log of all data mutations. Failures here must not break the main operation."""
     try:
         uid = user_id or _request_user.get("uid")
-        with pool.connection() as conn:
+        with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "INSERT INTO audit_log (table_name, record_id, action, old_values, new_values, user_id, created_at) VALUES (%s,%s,%s,%s,%s,%s,NOW())",
@@ -59,21 +81,21 @@ def audit_log(table_name, record_id, action, old_values=None, new_values=None, u
         # Never let audit failures break operations - just log to stderr
         print(f"[AUDIT FAIL] {table_name}/{record_id}/{action}: {e}")
 
-# ── Query helpers (use pool) ─────────────────────────────────────────────────
+# ── Query helpers (use pool if available, fall back to direct connect) ───────
 def query(sql, params=None):
-    with pool.connection() as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
             return cur.fetchall()
 
 def query_one(sql, params=None):
-    with pool.connection() as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
             return cur.fetchone()
 
 def execute(sql, params=None):
-    with pool.connection() as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
             try:
@@ -89,7 +111,7 @@ def execute(sql, params=None):
 @contextmanager
 def transaction():
     """Yields a cursor inside a transaction. Auto-commits on success, rolls back on exception."""
-    with pool.connection() as conn:
+    with get_conn() as conn:
         try:
             with conn.cursor() as cur:
                 yield cur
