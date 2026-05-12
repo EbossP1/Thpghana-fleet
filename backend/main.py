@@ -471,18 +471,19 @@ def recalculate_balance(cid: int, user=Depends(get_current_user)):
 # ── Fuel Transactions ─────────────────────────────────────────────────────────
 @app.get("/api/fuel-transactions")
 def get_fuel_tx(vehicle_id:Optional[int]=None,date_from:Optional[str]=None,date_to:Optional[str]=None,
-                project_id:Optional[int]=None,tx_type:Optional[str]=None,limit:int=100,user=Depends(get_current_user)):
+                project_id:Optional[int]=None,tx_type:Optional[str]=None,fuel_card_id:Optional[int]=None,limit:int=100,user=Depends(get_current_user)):
     sql="""SELECT ft.*,v.unit_number,v.registration,
            d.first_name||' '||d.last_name AS driver_name,
            fc.card_number,tc.card_number AS transfer_to_card_number,
            vn.name AS vendor_name,p.name AS project_name,ft2.name AS fuel_type_name
-           FROM fuel_transactions ft JOIN vehicles v ON v.id=ft.vehicle_id
+           FROM fuel_transactions ft LEFT JOIN vehicles v ON v.id=ft.vehicle_id
            LEFT JOIN drivers d ON d.id=ft.driver_id LEFT JOIN fuel_cards fc ON fc.id=ft.fuel_card_id
            LEFT JOIN fuel_cards tc ON tc.id=ft.transfer_to_card_id
            LEFT JOIN vendors vn ON vn.id=ft.vendor_id LEFT JOIN projects p ON p.id=ft.project_id
            LEFT JOIN fuel_types ft2 ON ft2.id=ft.fuel_type_id WHERE 1=1"""
     params=[]
     if vehicle_id: sql+=" AND ft.vehicle_id=%s"; params.append(vehicle_id)
+    if fuel_card_id: sql+=" AND (ft.fuel_card_id=%s OR ft.transfer_to_card_id=%s)"; params.append(fuel_card_id); params.append(fuel_card_id)
     if date_from: sql+=" AND ft.transaction_date>=%s"; params.append(date_from)
     if date_to: sql+=" AND ft.transaction_date<=%s"; params.append(date_to)
     if project_id: sql+=" AND ft.project_id=%s"; params.append(project_id)
@@ -1099,26 +1100,58 @@ def card_statement(cid: int, user=Depends(get_current_user)):
 
 @app.get("/api/reports/fuel-cards")
 def report_fuel_cards(date_from:Optional[str]=None,date_to:Optional[str]=None,user=Depends(get_current_user)):
-    date_filter=""
-    params_top=[]
-    params_exp=[]
-    params_trout=[]
-    params_trin=[]
+    # Filter for transactions WITHIN the period (used for period summary stats)
+    period_filter=""
+    period_params_per_card=[]  # per card we have 4 subqueries, each may take 0-2 date params
     if date_from:
-        date_filter+=" AND transaction_date>=%s"
-        params_top.append(date_from);params_exp.append(date_from);params_trout.append(date_from);params_trin.append(date_from)
+        period_filter+=" AND transaction_date>=%s"
+        period_params_per_card.append(date_from)
     if date_to:
-        date_filter+=" AND transaction_date<=%s"
-        params_top.append(date_to);params_exp.append(date_to);params_trout.append(date_to);params_trin.append(date_to)
+        period_filter+=" AND transaction_date<=%s"
+        period_params_per_card.append(date_to)
+    
+    # Filter for transactions UP TO date_to (used to compute period-end balance)
+    # If no date_to, balance is "now" (which equals current_balance)
+    upto_filter=""
+    upto_params_per_card=[]
+    if date_to:
+        upto_filter=" AND transaction_date<=%s"
+        upto_params_per_card.append(date_to)
+    
+    # Build the param list: 4 period subqueries + 4 upto subqueries per card row
+    # Order in SQL: total_topups, total_expenses, total_transfers_out, total_transfers_in,
+    #               cum_topups, cum_purchases, cum_transfers_out, cum_transfers_in
+    all_params = (period_params_per_card * 4) + (upto_params_per_card * 4)
+    
     cards = query("""SELECT fc.*, v.unit_number, v.registration, v.make, v.model,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='topup'"""+date_filter+"""),0) AS total_topups,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'"""+date_filter+"""),0) AS total_expenses,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='transfer'"""+date_filter+"""),0) AS total_transfers_out,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE transfer_to_card_id=fc.id AND transaction_type='transfer'"""+date_filter+"""),0) AS total_transfers_in,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='topup'"""+period_filter+"""),0) AS total_topups,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'"""+period_filter+"""),0) AS total_expenses,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='transfer'"""+period_filter+"""),0) AS total_transfers_out,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE transfer_to_card_id=fc.id AND transaction_type='transfer'"""+period_filter+"""),0) AS total_transfers_in,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='topup'"""+upto_filter+"""),0) AS cum_topups,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'"""+upto_filter+"""),0) AS cum_purchases,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='transfer'"""+upto_filter+"""),0) AS cum_transfers_out,
+                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE transfer_to_card_id=fc.id AND transaction_type='transfer'"""+upto_filter+"""),0) AS cum_transfers_in,
                      (SELECT MAX(transaction_date) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase') AS last_used
                      FROM fuel_cards fc LEFT JOIN vehicles v ON v.id=fc.vehicle_id
-                     WHERE fc.is_active=true ORDER BY fc.card_number""", params_top+params_exp+params_trout+params_trin)
-    total_balance = sum(float(c.get("current_balance") or 0) for c in cards)
+                     WHERE fc.is_active=true ORDER BY fc.card_number""", all_params)
+    
+    # Compute period-end balance for each card
+    # = initial_balance + cumulative topups - cumulative purchases - cumulative transfers out + cumulative transfers in
+    for c in cards:
+        initial = float(c.get("initial_balance") or 0)
+        cum_top = float(c.get("cum_topups") or 0)
+        cum_pur = float(c.get("cum_purchases") or 0)
+        cum_tout = float(c.get("cum_transfers_out") or 0)
+        cum_tin = float(c.get("cum_transfers_in") or 0)
+        # If no date_to filter, period-end balance = current live balance (most accurate)
+        if not date_to:
+            c["period_end_balance"] = float(c.get("current_balance") or 0)
+        else:
+            c["period_end_balance"] = initial + cum_top - cum_pur - cum_tout + cum_tin
+    
+    # Period summary uses period_end_balance for total_balance
+    total_balance = sum(float(c.get("period_end_balance") or 0) for c in cards)
     total_topups = sum(float(c.get("total_topups") or 0) for c in cards)
     total_expenses = sum(float(c.get("total_expenses") or 0) for c in cards)
     return {"cards": cards, "summary": {"total_balance": total_balance, "total_topups": total_topups, "total_expenses": total_expenses}}
