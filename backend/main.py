@@ -17,43 +17,24 @@ app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=True,all
 security = HTTPBearer()
 frontend_path = os.path.join(os.path.dirname(__file__),'..','frontend')
 
-# ── Connection Pool (optional, falls back to direct connect if unavailable) ──
-pool = None
-try:
-    from psycopg_pool import ConnectionPool
-    pool = ConnectionPool(
-        DATABASE_URL,
-        min_size=1,
-        max_size=10,
-        kwargs={"row_factory": psycopg.rows.dict_row},
-        open=False,  # lazy open - don't crash startup if DB unreachable
-    )
-    pool.open(wait=False)  # don't block startup waiting for connections
-    print("[INFO] Connection pool initialized")
-except ImportError:
-    print("[WARN] psycopg_pool not installed, falling back to per-request connections")
-except Exception as e:
-    print(f"[WARN] Connection pool init failed, falling back to per-request: {e}")
-    pool = None
+# ── Database Connection ──────────────────────────────────────────────────────
+# We use direct connections instead of a local pool because Supabase's own
+# connection pooler (port 5432 in the DATABASE_URL) already handles efficiency.
+# A local pool on top of Supabase's pooler causes connection conflicts in production.
+pool = None  # kept for backward compatibility in code that checks "if pool is not None"
 
 @app.on_event("shutdown")
 def close_pool():
-    if pool is not None:
-        try: pool.close()
-        except: pass
+    pass
 
-# Helper: yield a connection from pool or open one directly
+# Helper: yield a fresh connection per call
 @contextmanager
 def get_conn():
-    if pool is not None:
-        with pool.connection() as conn:
-            yield conn
-    else:
-        conn = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row)
-        try:
-            yield conn
-        finally:
-            conn.close()
+    conn = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 # ── Audit Logging ────────────────────────────────────────────────────────────
 # Tracks who changed what and when. Stored in audit_log table.
