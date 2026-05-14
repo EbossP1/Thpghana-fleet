@@ -23,6 +23,17 @@ frontend_path = os.path.join(os.path.dirname(__file__),'..','frontend')
 # A local pool on top of Supabase's pooler causes connection conflicts in production.
 pool = None  # kept for backward compatibility in code that checks "if pool is not None"
 
+# Normalize a date_to filter so it includes the full end day.
+# Without this, "2026-05-14" compares against "2026-05-14 00:00:00" which excludes
+# any transaction recorded later that same day.
+def _norm_date_to(d):
+    if not d: return d
+    s = str(d).strip()
+    # If only a date (no time component), append end-of-day
+    if len(s) == 10 and s.count("-") == 2:
+        return s + " 23:59:59"
+    return s
+
 @app.on_event("shutdown")
 def close_pool():
     pass
@@ -488,7 +499,7 @@ def get_fuel_tx(vehicle_id:Optional[int]=None,date_from:Optional[str]=None,date_
     if vehicle_id: sql+=" AND ft.vehicle_id=%s"; params.append(vehicle_id)
     if fuel_card_id: sql+=" AND (ft.fuel_card_id=%s OR ft.transfer_to_card_id=%s)"; params.append(fuel_card_id); params.append(fuel_card_id)
     if date_from: sql+=" AND ft.transaction_date>=%s"; params.append(date_from)
-    if date_to: sql+=" AND ft.transaction_date<=%s"; params.append(date_to)
+    if date_to: sql+=" AND ft.transaction_date<=%s"; params.append(_norm_date_to(date_to))
     if project_id: sql+=" AND ft.project_id=%s"; params.append(project_id)
     if tx_type: sql+=" AND ft.transaction_type=%s"; params.append(tx_type)
     sql+=" ORDER BY ft.transaction_date DESC LIMIT %s"; params.append(limit)
@@ -579,7 +590,7 @@ def get_trips(vehicle_id:Optional[int]=None,driver_id:Optional[int]=None,
     if driver_id: sql+=" AND t.driver_id=%s"; params.append(driver_id)
     if project_id: sql+=" AND t.project_id=%s"; params.append(project_id)
     if date_from: sql+=" AND t.trip_date>=%s"; params.append(date_from)
-    if date_to: sql+=" AND t.trip_date<=%s"; params.append(date_to)
+    if date_to: sql+=" AND t.trip_date<=%s"; params.append(_norm_date_to(date_to))
     sql+=" ORDER BY t.trip_date DESC,t.departure_time DESC LIMIT %s"; params.append(limit)
     return query(sql,params)
 
@@ -618,8 +629,8 @@ def fuel_efficiency(vehicle_id:Optional[int]=None,date_from:Optional[str]=None,
     if date_to:
         trip_filter+=" AND t.trip_date<=%s"
         fuel_filter+=" AND ft.transaction_date<=%s"
-        trip_params.append(date_to)
-        fuel_params.append(date_to)
+        trip_params.append(_norm_date_to(date_to))
+        fuel_params.append(_norm_date_to(date_to))
     
     # Per-vehicle efficiency aggregation
     rows = query("""
@@ -844,7 +855,7 @@ def get_audit_log(table:Optional[str]=None,action:Optional[str]=None,user_id:Opt
     if action: sql+=" AND a.action=%s"; params.append(action)
     if user_id: sql+=" AND a.user_id=%s"; params.append(user_id)
     if date_from: sql+=" AND a.created_at>=%s"; params.append(date_from)
-    if date_to: sql+=" AND a.created_at<=%s"; params.append(date_to)
+    if date_to: sql+=" AND a.created_at<=%s"; params.append(_norm_date_to(date_to))
     sql+=" ORDER BY a.created_at DESC LIMIT %s"; params.append(limit)
     return query(sql, params)
 
@@ -944,7 +955,7 @@ def report_fuel(date_from:Optional[str]=None,date_to:Optional[str]=None,
            WHERE ft.transaction_type='purchase'"""
     params=[]
     if date_from: sql+=" AND ft.transaction_date>=%s"; params.append(date_from)
-    if date_to: sql+=" AND ft.transaction_date<=%s"; params.append(date_to)
+    if date_to: sql+=" AND ft.transaction_date<=%s"; params.append(_norm_date_to(date_to))
     if vehicle_id: sql+=" AND ft.vehicle_id=%s"; params.append(vehicle_id)
     if project_id: sql+=" AND ft.project_id=%s"; params.append(project_id)
     return query(sql+" ORDER BY v.registration,v.unit_number,ft.transaction_date",params)
@@ -1111,7 +1122,7 @@ def report_fuel_cards(date_from:Optional[str]=None,date_to:Optional[str]=None,us
         period_params_per_card.append(date_from)
     if date_to:
         period_filter+=" AND transaction_date<=%s"
-        period_params_per_card.append(date_to)
+        period_params_per_card.append(_norm_date_to(date_to))
     
     # Filter for transactions UP TO date_to (used to compute period-end balance)
     # If no date_to, balance is "now" (which equals current_balance)
@@ -1119,7 +1130,7 @@ def report_fuel_cards(date_from:Optional[str]=None,date_to:Optional[str]=None,us
     upto_params_per_card=[]
     if date_to:
         upto_filter=" AND transaction_date<=%s"
-        upto_params_per_card.append(date_to)
+        upto_params_per_card.append(_norm_date_to(date_to))
     
     # Build the param list: 4 period subqueries + 4 upto subqueries per card row
     # Order in SQL: total_topups, total_expenses, total_transfers_out, total_transfers_in,
