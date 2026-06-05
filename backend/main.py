@@ -225,6 +225,8 @@ def me(user=Depends(get_current_user)):
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 @app.get("/api/dashboard")
 def dashboard(user=Depends(get_current_user)):
+    # Refresh reminders so the counters reflect current state
+    _refresh_all_reminders()
     stats={
         "vehicles_total": query_one("SELECT COUNT(*) as c FROM vehicles WHERE is_active=true")["c"],
         "drivers_total": query_one("SELECT COUNT(*) as c FROM drivers WHERE is_active=true")["c"],
@@ -344,21 +346,22 @@ def _refresh_vehicle_reminders(vid):
     if not v: return
     execute("DELETE FROM reminders WHERE vehicle_id=%s AND reminder_type IN ('insurance','roadworthy')",(vid,))
     today=datetime.now().date()
-    label=f"{v['unit_number']} - {v['registration']}"
+    label=f"{v['unit_number']}" + (f" - {v['registration']}" if v.get('registration') else "")
     if v.get("insurance_expiry"):
         exp=v["insurance_expiry"]
-        days=(exp-today).days if hasattr(exp,'days') else 999
-        if hasattr(exp,'strftime'): days=(exp-today).days
-        pri="critical" if days<0 else "high" if days<=30 else "medium"
-        title=f"Insurance {'EXPIRED' if days<0 else f'expiring in {days} days'} — {label}"
-        execute("INSERT INTO reminders (vehicle_id,reminder_type,title,due_date,priority) VALUES (%s,'insurance',%s,%s,%s)",(vid,title,exp,pri))
+        days=(exp-today).days if hasattr(exp,'strftime') else 999
+        # Only create reminder if expiring within 60 days or already expired
+        if days<=60:
+            pri="critical" if days<0 else "high" if days<=30 else "medium"
+            title=f"Insurance {'EXPIRED' if days<0 else f'expiring in {days} days'} — {label}"
+            execute("INSERT INTO reminders (vehicle_id,reminder_type,title,due_date,priority) VALUES (%s,'insurance',%s,%s,%s)",(vid,title,exp,pri))
     if v.get("roadworthy_expiry"):
         exp=v["roadworthy_expiry"]
-        if hasattr(exp,'strftime'): days=(exp-today).days
-        else: days=999
-        pri="critical" if days<0 else "high" if days<=30 else "medium"
-        title=f"Roadworthy {'EXPIRED' if days<0 else f'expiring in {days} days'} — {label}"
-        execute("INSERT INTO reminders (vehicle_id,reminder_type,title,due_date,priority) VALUES (%s,'roadworthy',%s,%s,%s)",(vid,title,exp,pri))
+        days=(exp-today).days if hasattr(exp,'strftime') else 999
+        if days<=60:
+            pri="critical" if days<0 else "high" if days<=30 else "medium"
+            title=f"Roadworthy {'EXPIRED' if days<0 else f'expiring in {days} days'} — {label}"
+            execute("INSERT INTO reminders (vehicle_id,reminder_type,title,due_date,priority) VALUES (%s,'roadworthy',%s,%s,%s)",(vid,title,exp,pri))
 
 # ── Drivers ───────────────────────────────────────────────────────────────────
 @app.get("/api/drivers")
@@ -399,18 +402,18 @@ def _refresh_driver_reminders(did):
     name=f"{d['first_name']} {d['last_name']}"
     if d.get("licence_expiry"):
         exp=d["licence_expiry"]
-        if hasattr(exp,'strftime'): days=(exp-today).days
-        else: days=999
-        pri="critical" if days<0 else "high" if days<=30 else "medium"
-        execute("INSERT INTO reminders (driver_id,reminder_type,title,due_date,priority) VALUES (%s,'licence',%s,%s,%s)",
-                (did,f"Driver licence {'EXPIRED' if days<0 else f'expiring in {days} days'} — {name}",exp,pri))
+        days=(exp-today).days if hasattr(exp,'strftime') else 999
+        if days<=60:
+            pri="critical" if days<0 else "high" if days<=30 else "medium"
+            execute("INSERT INTO reminders (driver_id,reminder_type,title,due_date,priority) VALUES (%s,'licence',%s,%s,%s)",
+                    (did,f"Driver licence {'EXPIRED' if days<0 else f'expiring in {days} days'} — {name}",exp,pri))
     if d.get("health_expiry"):
         exp=d["health_expiry"]
-        if hasattr(exp,'strftime'): days=(exp-today).days
-        else: days=999
-        pri="critical" if days<0 else "high" if days<=30 else "medium"
-        execute("INSERT INTO reminders (driver_id,reminder_type,title,due_date,priority) VALUES (%s,'health',%s,%s,%s)",
-                (did,f"Health certificate {'EXPIRED' if days<0 else f'expiring in {days} days'} — {name}",exp,pri))
+        days=(exp-today).days if hasattr(exp,'strftime') else 999
+        if days<=60:
+            pri="critical" if days<0 else "high" if days<=30 else "medium"
+            execute("INSERT INTO reminders (driver_id,reminder_type,title,due_date,priority) VALUES (%s,'health',%s,%s,%s)",
+                    (did,f"Health certificate {'EXPIRED' if days<0 else f'expiring in {days} days'} — {name}",exp,pri))
 
 # ── Fuel Cards ────────────────────────────────────────────────────────────────
 @app.get("/api/fuel-cards")
@@ -725,6 +728,8 @@ def create_maintenance(data:MaintenanceCreate,user=Depends(get_current_user)):
          data.service_date,data.odometer,data.description,data.technician,
          data.labour_cost,data.parts_cost,data.total_cost,data.invoice_number,
          data.next_due_date,data.next_due_odometer,data.notes))
+    # Auto-resolve any existing service reminders for this vehicle (this maintenance IS the resolution)
+    execute("UPDATE reminders SET status='resolved' WHERE vehicle_id=%s AND reminder_type='service' AND status='active'", (data.vehicle_id,))
     if data.next_due_date and data.maintenance_type_id:
         execute("INSERT INTO reminders (vehicle_id,reminder_type,title,due_date,priority) VALUES (%s,'service',%s,%s,'medium') ON CONFLICT DO NOTHING",
                 (data.vehicle_id,f"Service due — {data.description}",data.next_due_date))
@@ -779,8 +784,35 @@ def create_roadworthy(data:RoadworthyCreate,user=Depends(get_current_user)):
     return {"id":row["id"],"message":"Roadworthy record created"}
 
 # ── Reminders ─────────────────────────────────────────────────────────────────
+def _refresh_all_reminders():
+    """Re-evaluate every reminder source. Clears stale reminders and creates new ones as needed."""
+    try:
+        # Vehicles - insurance & roadworthy
+        vehs = query("SELECT id FROM vehicles WHERE is_active=true")
+        for v in vehs:
+            _refresh_vehicle_reminders(v["id"])
+        # Drivers - licence & health
+        drvs = query("SELECT id FROM drivers WHERE is_active=true")
+        for d in drvs:
+            _refresh_driver_reminders(d["id"])
+        # Fuel cards - low balance
+        cards = query("SELECT * FROM fuel_cards WHERE is_active=true")
+        for c in cards:
+            _check_card_balance(c)
+        # Auto-resolve service reminders whose due_date is in the future (newly serviced)
+        # and remove expired/stale ones whose underlying record no longer needs attention
+    except Exception as e:
+        print(f"[REMINDER REFRESH WARN] {e}")
+
+@app.post("/api/reminders/refresh")
+def refresh_reminders_endpoint(user=Depends(get_current_user)):
+    _refresh_all_reminders()
+    return {"message":"Reminders refreshed"}
+
 @app.get("/api/reminders")
 def get_reminders(status:Optional[str]=None,user=Depends(get_current_user)):
+    # Auto-refresh on every list call so stale reminders disappear
+    _refresh_all_reminders()
     sql="""SELECT r.*,v.unit_number,v.registration,v.make,v.model,v.department_id,
            dep.name AS department_name,d.first_name||' '||d.last_name AS driver_name
            FROM reminders r LEFT JOIN vehicles v ON v.id=r.vehicle_id
@@ -1077,8 +1109,10 @@ def _check_card_balance(card):
     if not card: return
     bal = float(card.get("current_balance") or 0)
     threshold = float(card.get("balance_threshold") or 500)
+    # Always remove existing low-balance reminder first
+    execute("DELETE FROM reminders WHERE reference=%s AND reminder_type='fuel_card'", (f"card_{card['id']}",))
+    # Only re-create if balance is still at or below threshold
     if bal <= threshold:
-        execute("DELETE FROM reminders WHERE reference=%s AND reminder_type='fuel_card'", (f"card_{card['id']}",))
         pri = "critical" if bal <= 0 else "high" if bal <= threshold * 0.5 else "medium"
         execute("""INSERT INTO reminders (reminder_type, title, priority, reference)
                    VALUES ('fuel_card', %s, %s, %s)""",
