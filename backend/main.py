@@ -12,14 +12,8 @@ from dotenv import load_dotenv
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL","postgresql://fleetuser:fleetpass@localhost:5432/fleetdb")
 JWT_SECRET = os.getenv("JWT_SECRET","thp-ghana-fleet-secret")
-if JWT_SECRET == "thp-ghana-fleet-secret":
-    print("[SECURITY WARNING] JWT_SECRET is using the built-in default. Set a strong JWT_SECRET in .env before production use.")
 app = FastAPI(title="THP Ghana Fleet API")
-# NOTE: allow_credentials=True combined with allow_origins=["*"] is rejected by browsers
-# for credentialed requests. This API uses Bearer tokens (not cookies), so credentials
-# are not needed. Origins are configurable via CORS_ORIGINS (comma-separated) in .env.
-_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS","*").split(",") if o.strip()]
-app.add_middleware(CORSMiddleware,allow_origins=_cors_origins,allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
+app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 security = HTTPBearer()
 frontend_path = os.path.join(os.path.dirname(__file__),'..','frontend')
 
@@ -119,9 +113,7 @@ def transaction():
             raise
 
 def create_token(uid, role):
-    # timezone.utc: datetime.utcnow() is deprecated in Python 3.12+
-    from datetime import timezone
-    return jwt.encode({"sub":str(uid),"role":role,"exp":datetime.now(timezone.utc)+timedelta(hours=24)},JWT_SECRET,algorithm="HS256")
+    return jwt.encode({"sub":str(uid),"role":role,"exp":datetime.utcnow()+timedelta(hours=24)},JWT_SECRET,algorithm="HS256")
 
 def get_current_user(credentials:HTTPAuthorizationCredentials=Depends(security)):
     try:
@@ -129,38 +121,11 @@ def get_current_user(credentials:HTTPAuthorizationCredentials=Depends(security))
         user = {"id":int(p["sub"]),"role":p["role"]}
         _set_audit_user(user["id"])
         return user
-    except (jwt.PyJWTError, KeyError, ValueError):
-        raise HTTPException(status_code=401,detail="Invalid token")
+    except: raise HTTPException(status_code=401,detail="Invalid token")
 
 def require_admin(user=Depends(get_current_user)):
     if user["role"] != "admin": raise HTTPException(status_code=403,detail="Admin required")
     return user
-
-def require_editor(user=Depends(get_current_user)):
-    """Blocks read-only 'viewer' accounts from all data mutations."""
-    if user["role"] == "viewer": raise HTTPException(status_code=403,detail="Your account is read-only. Contact an administrator.")
-    return user
-
-# ── Login rate limiting (in-memory, per username) ─────────────────────────────
-# 5 failed attempts locks the username for 15 minutes. Resets on success or restart.
-_login_fails = {}  # username -> [count, locked_until_datetime]
-MAX_LOGIN_ATTEMPTS = 5
-LOCKOUT_MINUTES = 15
-
-def _login_locked(username):
-    rec = _login_fails.get(username)
-    if rec and rec[1] and datetime.now() < rec[1]:
-        return True
-    return False
-
-def _record_login_fail(username):
-    rec = _login_fails.setdefault(username, [0, None])
-    rec[0] += 1
-    if rec[0] >= MAX_LOGIN_ATTEMPTS:
-        rec[1] = datetime.now() + timedelta(minutes=LOCKOUT_MINUTES)
-
-def _clear_login_fails(username):
-    _login_fails.pop(username, None)
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class LoginRequest(BaseModel): username:str; password:str
@@ -244,26 +209,12 @@ class PasswordChange(BaseModel): password:str
 @app.get("/")
 def serve(): return FileResponse(os.path.join(frontend_path,'index.html'))
 
-@app.get("/api/health")
-def health():
-    """Unauthenticated liveness check for monitoring. Confirms DB connectivity."""
-    try:
-        query_one("SELECT 1 AS ok")
-        return {"status": "ok", "database": "connected"}
-    except Exception:
-        raise HTTPException(503, "Database unreachable")
-
 # ── Auth ──────────────────────────────────────────────────────────────────────
 @app.post("/api/auth/login")
 def login(req:LoginRequest):
-    uname = req.username.strip()
-    if _login_locked(uname):
-        raise HTTPException(status_code=429,detail=f"Too many failed attempts. Try again in {LOCKOUT_MINUTES} minutes.")
-    user=query_one("SELECT * FROM users WHERE username=%s AND is_active=true",(uname,))
+    user=query_one("SELECT * FROM users WHERE username=%s AND is_active=true",(req.username,))
     if not user or not bcrypt.checkpw(req.password.encode(),user["password_hash"].encode()):
-        _record_login_fail(uname)
         raise HTTPException(status_code=401,detail="Invalid credentials")
-    _clear_login_fails(uname)
     execute("UPDATE users SET last_login=NOW() WHERE id=%s",(user["id"],))
     return {"token":create_token(user["id"],user["role"]),"user":{"id":user["id"],"username":user["username"],"role":user["role"],"first_name":user["first_name"],"last_name":user["last_name"]}}
 
@@ -354,7 +305,7 @@ def get_vehicle(vid:int,user=Depends(get_current_user)):
     return v
 
 @app.post("/api/vehicles",status_code=201)
-def create_vehicle(data:VehicleCreate,user=Depends(require_editor)):
+def create_vehicle(data:VehicleCreate,user=Depends(get_current_user)):
     row=execute("""INSERT INTO vehicles (unit_number,registration,vin,make,model,year,color,engine_number,
         vehicle_type_id,fuel_type_id,department_id,group_id,tank_capacity,current_odometer,
         purchase_date,purchase_cost,purchase_vendor_id,insurance_policy,insurance_vendor_id,
@@ -369,7 +320,7 @@ def create_vehicle(data:VehicleCreate,user=Depends(require_editor)):
     return {"id":row["id"],"message":"Vehicle created"}
 
 @app.put("/api/vehicles/{vid}")
-def update_vehicle(vid:int,data:VehicleCreate,user=Depends(require_editor)):
+def update_vehicle(vid:int,data:VehicleCreate,user=Depends(get_current_user)):
     old = query_one("SELECT * FROM vehicles WHERE id=%s", (vid,))
     execute("""UPDATE vehicles SET unit_number=%s,registration=%s,vin=%s,make=%s,model=%s,year=%s,color=%s,
         engine_number=%s,vehicle_type_id=%s,fuel_type_id=%s,department_id=%s,group_id=%s,tank_capacity=%s,
@@ -384,7 +335,7 @@ def update_vehicle(vid:int,data:VehicleCreate,user=Depends(require_editor)):
     return {"message":"Updated"}
 
 @app.delete("/api/vehicles/{vid}")
-def delete_vehicle(vid:int,user=Depends(require_admin)):
+def delete_vehicle(vid:int,user=Depends(get_current_user)):
     old = query_one("SELECT * FROM vehicles WHERE id=%s", (vid,))
     execute("UPDATE vehicles SET is_active=false WHERE id=%s",(vid,))
     audit_log("vehicles", vid, "DEACTIVATE", old_values=old, user_id=user["id"])
@@ -422,7 +373,7 @@ def get_drivers(search:Optional[str]=None,user=Depends(get_current_user)):
     return query(sql+" ORDER BY d.last_name,d.first_name",params)
 
 @app.post("/api/drivers",status_code=201)
-def create_driver(data:DriverCreate,user=Depends(require_editor)):
+def create_driver(data:DriverCreate,user=Depends(get_current_user)):
     row=execute("""INSERT INTO drivers (employee_number,first_name,last_name,job_title,email,phone,
         department_id,licence_number,licence_expiry,licence_state,health_ref,health_expiry,hire_date,hourly_wage,category_id,service_type,notes,photo_url)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
@@ -433,7 +384,7 @@ def create_driver(data:DriverCreate,user=Depends(require_editor)):
     return {"id":row["id"],"message":"Driver created"}
 
 @app.put("/api/drivers/{did}")
-def update_driver(did:int,data:DriverCreate,user=Depends(require_editor)):
+def update_driver(did:int,data:DriverCreate,user=Depends(get_current_user)):
     execute("""UPDATE drivers SET employee_number=%s,first_name=%s,last_name=%s,job_title=%s,email=%s,phone=%s,
         department_id=%s,licence_number=%s,licence_expiry=%s,licence_state=%s,health_ref=%s,health_expiry=%s,
         hire_date=%s,hourly_wage=%s,category_id=%s,service_type=%s,notes=%s,photo_url=%s,updated_at=NOW() WHERE id=%s""",
@@ -472,35 +423,25 @@ def get_fuel_cards(user=Depends(get_current_user)):
         LEFT JOIN drivers d ON d.id=fc.driver_id WHERE fc.is_active=true ORDER BY fc.card_number""")
 
 @app.post("/api/fuel-cards",status_code=201)
-def create_fuel_card(data:FuelCardCreate,user=Depends(require_editor)):
+def create_fuel_card(data:FuelCardCreate,user=Depends(get_current_user)):
     row=execute("INSERT INTO fuel_cards (card_number,card_type,vehicle_id,driver_id,current_balance,initial_balance,notes) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
         (data.card_number,data.card_type,data.vehicle_id,data.driver_id,data.current_balance,data.current_balance,data.notes))
     return {"id":row["id"],"message":"Card created"}
 
 @app.put("/api/fuel-cards/{cid}")
-def update_fuel_card(cid:int,data:FuelCardCreate,user=Depends(require_editor)):
+def update_fuel_card(cid:int,data:FuelCardCreate,user=Depends(get_current_user)):
     execute("UPDATE fuel_cards SET card_number=%s,vehicle_id=%s,driver_id=%s,notes=%s,updated_at=NOW() WHERE id=%s",
         (data.card_number,data.vehicle_id,data.driver_id,data.notes,cid))
     return {"message":"Updated"}
 
 class BalanceAdjust(BaseModel):
     amount: float
-    reason: Optional[str] = None
  
 @app.put("/api/fuel-cards/{cid}/adjust-balance")
-def adjust_balance(cid: int, data: BalanceAdjust, user=Depends(require_admin)):
-    # CRITICAL FIX: adjustments are now written to the fuel_transactions ledger.
-    # Previously they only touched current_balance, so /recalculate would silently
-    # undo them and period-end balances in reports/statements could never reconcile.
-    # The 'adjustment' type carries a SIGNED total_cost (+/-). See MIGRATION.sql.
+def adjust_balance(cid: int, data: BalanceAdjust, user=Depends(get_current_user)):
     old_card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
-    if not old_card: raise HTTPException(404, "Card not found")
-    with transaction() as cur:
-        cur.execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
-                (data.amount, cid))
-        cur.execute("""INSERT INTO fuel_transactions (transaction_date, transaction_type, fuel_card_id, total_cost, litres, reference, created_by)
-                   VALUES (NOW(), 'adjustment', %s, %s, 0, %s, %s)""",
-                (cid, data.amount, (getattr(data, "reason", None) or f"Manual balance adjustment GH₵{data.amount:+.2f}"), f"user_{user['id']}"))
+    execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
+            (data.amount, cid))
     card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
     if card:
         _check_card_balance(card)
@@ -512,7 +453,7 @@ def adjust_balance(cid: int, data: BalanceAdjust, user=Depends(require_admin)):
  
 # Soft-delete fuel card
 @app.delete("/api/fuel-cards/{cid}")
-def delete_fuel_card(cid: int, user=Depends(require_admin)):
+def delete_fuel_card(cid: int, user=Depends(get_current_user)):
     old = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
     execute("UPDATE fuel_cards SET is_active=false WHERE id=%s", (cid,))
     audit_log("fuel_cards", cid, "DEACTIVATE", old_values=old, user_id=user["id"])
@@ -520,7 +461,7 @@ def delete_fuel_card(cid: int, user=Depends(require_admin)):
 
 # Recalculate balance from initial_balance + all transactions (fixes corrupted balances)
 @app.post("/api/fuel-cards/{cid}/recalculate")
-def recalculate_balance(cid: int, user=Depends(require_admin)):
+def recalculate_balance(cid: int, user=Depends(get_current_user)):
     card = query_one("SELECT * FROM fuel_cards WHERE id=%s", (cid,))
     if not card: raise HTTPException(404, "Card not found")
     # Get the initial balance (stored when card was first created)
@@ -534,8 +475,6 @@ def recalculate_balance(cid: int, user=Depends(require_admin)):
             net += amt
         elif t["transaction_type"] == "purchase":
             net -= amt
-        elif t["transaction_type"] == "adjustment":
-            net += amt  # signed: positive adds, negative deducts
         elif t["transaction_type"] == "transfer":
             net -= amt  # transfers out
     # Also add transfers IN to this card
@@ -570,9 +509,7 @@ def get_fuel_tx(vehicle_id:Optional[int]=None,date_from:Optional[str]=None,date_
     return query(sql,params)
 
 @app.post("/api/fuel-transactions",status_code=201)
-def create_fuel_tx(data:FuelTxCreate,user=Depends(require_editor)):
-    if data.transaction_type not in ("purchase","topup","transfer"):
-        raise HTTPException(400, "Invalid transaction type. Balance adjustments must go through the card's Adjust Balance action.")
+def create_fuel_tx(data:FuelTxCreate,user=Depends(get_current_user)):
     # All writes in one atomic transaction — if any step fails, all rollback
     with transaction() as cur:
         cur.execute("""INSERT INTO fuel_transactions (transaction_date,transaction_type,vehicle_id,driver_id,
@@ -616,7 +553,7 @@ def create_fuel_tx(data:FuelTxCreate,user=Depends(require_editor)):
     return {"id":new_id,"message":"Transaction recorded"}
 
 @app.delete("/api/fuel-transactions/{tid}")
-def delete_fuel_tx(tid:int,user=Depends(require_editor)):
+def delete_fuel_tx(tid:int,user=Depends(get_current_user)):
     # Capture original state for audit
     tx = query_one("SELECT * FROM fuel_transactions WHERE id=%s", (tid,))
     if not tx:
@@ -628,8 +565,7 @@ def delete_fuel_tx(tid:int,user=Depends(require_editor)):
             if tx["transaction_type"] == "purchase" and tx.get("fuel_card_id"):
                 cur.execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
                         (amt, tx["fuel_card_id"]))
-            elif tx["transaction_type"] in ("topup", "adjustment") and tx.get("fuel_card_id"):
-                # topup: subtract the amount back; adjustment: amt is signed, so subtracting reverses it either way
+            elif tx["transaction_type"] == "topup" and tx.get("fuel_card_id"):
                 cur.execute("UPDATE fuel_cards SET current_balance = current_balance - %s, updated_at=NOW() WHERE id=%s",
                         (amt, tx["fuel_card_id"]))
             elif tx["transaction_type"] == "transfer":
@@ -661,55 +597,19 @@ def get_trips(vehicle_id:Optional[int]=None,driver_id:Optional[int]=None,
     sql+=" ORDER BY t.trip_date DESC,t.departure_time DESC LIMIT %s"; params.append(limit)
     return query(sql,params)
 
-@app.get("/api/trips/{tid}")
-def get_trip(tid:int,user=Depends(get_current_user)):
-    t = query_one("SELECT * FROM trips WHERE id=%s",(tid,))
-    if not t: raise HTTPException(404,"Trip not found")
-    return t
-
 @app.post("/api/trips",status_code=201)
-def create_trip(data:TripCreate,user=Depends(require_editor)):
-    if data.odometer_start is not None and data.odometer_end is not None and data.odometer_end <= data.odometer_start:
-        raise HTTPException(400, "Odometer end must be greater than odometer start")
-    with transaction() as cur:
-        # NOTE: trips.distance is a GENERATED column (odometer_end - odometer_start)
-        # computed by PostgreSQL itself — never write to it directly.
-        cur.execute("""INSERT INTO trips (vehicle_id,driver_id,project_id,trip_date,departure_time,return_time,
-            origin,destination,purpose,odometer_start,odometer_end,passengers,notes)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-            (data.vehicle_id,data.driver_id,data.project_id,data.trip_date,data.departure_time,
-             data.return_time,data.origin,data.destination,data.purpose,data.odometer_start,
-             data.odometer_end,data.passengers,data.notes))
-        new_id = cur.fetchone()["id"]
-        # Keep vehicle odometer current, same as fuel transactions do
-        if data.odometer_end:
-            cur.execute("UPDATE vehicles SET current_odometer=%s,updated_at=NOW() WHERE id=%s AND current_odometer<%s",
-                    (data.odometer_end,data.vehicle_id,data.odometer_end))
-    audit_log("trips", new_id, "CREATE", new_values=data.dict(), user_id=user["id"])
-    return {"id":new_id,"message":"Trip logged"}
-
-@app.put("/api/trips/{tid}")
-def update_trip(tid:int,data:TripCreate,user=Depends(require_editor)):
-    old = query_one("SELECT * FROM trips WHERE id=%s",(tid,))
-    if not old: raise HTTPException(404,"Trip not found")
-    if data.odometer_start is not None and data.odometer_end is not None and data.odometer_end <= data.odometer_start:
-        raise HTTPException(400, "Odometer end must be greater than odometer start")
-    execute("""UPDATE trips SET vehicle_id=%s,driver_id=%s,project_id=%s,trip_date=%s,departure_time=%s,
-        return_time=%s,origin=%s,destination=%s,purpose=%s,odometer_start=%s,odometer_end=%s,
-        passengers=%s,notes=%s WHERE id=%s""",
+def create_trip(data:TripCreate,user=Depends(get_current_user)):
+    row=execute("""INSERT INTO trips (vehicle_id,driver_id,project_id,trip_date,departure_time,return_time,
+        origin,destination,purpose,odometer_start,odometer_end,passengers,notes)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (data.vehicle_id,data.driver_id,data.project_id,data.trip_date,data.departure_time,
          data.return_time,data.origin,data.destination,data.purpose,data.odometer_start,
-         data.odometer_end,data.passengers,data.notes,tid))
-    audit_log("trips", tid, "UPDATE", old_values=old, new_values=data.dict(), user_id=user["id"])
-    return {"message":"Updated"}
+         data.odometer_end,data.passengers,data.notes))
+    return {"id":row["id"],"message":"Trip logged"}
 
 @app.delete("/api/trips/{tid}")
-def delete_trip(tid:int,user=Depends(require_editor)):
-    old = query_one("SELECT * FROM trips WHERE id=%s",(tid,))
-    if not old: raise HTTPException(404,"Trip not found")
-    execute("DELETE FROM trips WHERE id=%s",(tid,))
-    audit_log("trips", tid, "DELETE", old_values=old, user_id=user["id"])
-    return {"message":"Deleted"}
+def delete_trip(tid:int,user=Depends(get_current_user)):
+    execute("DELETE FROM trips WHERE id=%s",(tid,)); return {"message":"Deleted"}
 
 @app.get("/api/fuel-efficiency")
 def fuel_efficiency(vehicle_id:Optional[int]=None,date_from:Optional[str]=None,
@@ -819,7 +719,7 @@ def get_maintenance(vehicle_id:Optional[int]=None,limit:int=100,user=Depends(get
     return query(sql,params)
 
 @app.post("/api/maintenance",status_code=201)
-def create_maintenance(data:MaintenanceCreate,user=Depends(require_editor)):
+def create_maintenance(data:MaintenanceCreate,user=Depends(get_current_user)):
     row=execute("""INSERT INTO maintenance_records (vehicle_id,maintenance_type_id,vendor_id,project_id,
         service_date,odometer,description,technician,labour_cost,parts_cost,total_cost,
         invoice_number,next_due_date,next_due_odometer,notes)
@@ -836,7 +736,7 @@ def create_maintenance(data:MaintenanceCreate,user=Depends(require_editor)):
     return {"id":row["id"],"message":"Record created"}
 
 @app.put("/api/maintenance/{mid}")
-def update_maintenance(mid:int,data:MaintenanceCreate,user=Depends(require_editor)):
+def update_maintenance(mid:int,data:MaintenanceCreate,user=Depends(get_current_user)):
     execute("""UPDATE maintenance_records SET maintenance_type_id=%s,vendor_id=%s,project_id=%s,
         service_date=%s,odometer=%s,description=%s,technician=%s,labour_cost=%s,parts_cost=%s,
         total_cost=%s,invoice_number=%s,next_due_date=%s,next_due_odometer=%s,notes=%s,updated_at=NOW() WHERE id=%s""",
@@ -848,38 +748,69 @@ def update_maintenance(mid:int,data:MaintenanceCreate,user=Depends(require_edito
 # ── Insurance ─────────────────────────────────────────────────────────────────
 @app.get("/api/insurance")
 def get_insurance(vehicle_id:Optional[int]=None,user=Depends(get_current_user)):
-    sql="""SELECT ir.*,v.unit_number,v.registration,vn.name AS vendor_name,p.name AS project_name
+    # Dedicated insurance records
+    sql="""SELECT ir.*,v.unit_number,v.registration,vn.name AS vendor_name,p.name AS project_name,
+           'record' AS source
            FROM insurance_records ir JOIN vehicles v ON v.id=ir.vehicle_id
-           LEFT JOIN vendors vn ON vn.id=ir.vendor_id LEFT JOIN projects p ON p.id=ir.project_id WHERE 1=1"""
+           LEFT JOIN vendors vn ON vn.id=ir.vendor_id LEFT JOIN projects p ON p.id=ir.project_id WHERE v.is_active=true"""
     params=[]
     if vehicle_id: sql+=" AND ir.vehicle_id=%s"; params.append(vehicle_id)
-    return query(sql+" ORDER BY ir.expiry_date DESC",params)
+    records = query(sql+" ORDER BY ir.expiry_date DESC",params)
+    # Vehicle-level insurance (entered via vehicle form) not already covered by a record
+    covered_vehicle_ids = set(r["vehicle_id"] for r in records)
+    vsql="""SELECT v.id AS vehicle_id,v.unit_number,v.registration,v.insurance_policy AS policy_number,
+            v.insurance_expiry AS expiry_date,v.insurance_cost AS cost,NULL AS start_date,
+            vn.name AS vendor_name,NULL AS project_name,NULL AS notes,'vehicle' AS source
+            FROM vehicles v LEFT JOIN vendors vn ON vn.id=v.insurance_vendor_id
+            WHERE v.is_active=true AND v.insurance_expiry IS NOT NULL"""
+    vparams=[]
+    if vehicle_id: vsql+=" AND v.id=%s"; vparams.append(vehicle_id)
+    vehicle_level = query(vsql+" ORDER BY v.insurance_expiry DESC",vparams)
+    for vr in vehicle_level:
+        if vr["vehicle_id"] not in covered_vehicle_ids:
+            records.append(vr)
+    return records
 
 @app.post("/api/insurance",status_code=201)
-def create_insurance(data:InsuranceCreate,user=Depends(require_editor)):
+def create_insurance(data:InsuranceCreate,user=Depends(get_current_user)):
     row=execute("""INSERT INTO insurance_records (vehicle_id,vendor_id,project_id,policy_number,start_date,expiry_date,cost,notes)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (data.vehicle_id,data.vendor_id,data.project_id,data.policy_number,data.start_date,data.expiry_date,data.cost,data.notes))
-    execute("UPDATE vehicles SET insurance_expiry=%s,insurance_cost=%s WHERE id=%s",(data.expiry_date,data.cost,data.vehicle_id))
+    execute("UPDATE vehicles SET insurance_expiry=%s,insurance_cost=%s,insurance_policy=%s,insurance_vendor_id=%s WHERE id=%s",
+            (data.expiry_date,data.cost,data.policy_number,data.vendor_id,data.vehicle_id))
     _refresh_vehicle_reminders(data.vehicle_id)
     return {"id":row["id"],"message":"Insurance record created"}
 
 # ── Roadworthy ────────────────────────────────────────────────────────────────
 @app.get("/api/roadworthy")
 def get_roadworthy(vehicle_id:Optional[int]=None,user=Depends(get_current_user)):
-    sql="""SELECT rr.*,v.unit_number,v.registration,vn.name AS vendor_name,p.name AS project_name
+    sql="""SELECT rr.*,v.unit_number,v.registration,vn.name AS vendor_name,p.name AS project_name,
+           'record' AS source
            FROM roadworthy_records rr JOIN vehicles v ON v.id=rr.vehicle_id
-           LEFT JOIN vendors vn ON vn.id=rr.vendor_id LEFT JOIN projects p ON p.id=rr.project_id WHERE 1=1"""
+           LEFT JOIN vendors vn ON vn.id=rr.vendor_id LEFT JOIN projects p ON p.id=rr.project_id WHERE v.is_active=true"""
     params=[]
     if vehicle_id: sql+=" AND rr.vehicle_id=%s"; params.append(vehicle_id)
-    return query(sql+" ORDER BY rr.expiry_date DESC",params)
+    records = query(sql+" ORDER BY rr.expiry_date DESC",params)
+    covered = set(r["vehicle_id"] for r in records)
+    vsql="""SELECT v.id AS vehicle_id,v.unit_number,v.registration,v.roadworthy_number AS certificate_number,
+            v.roadworthy_expiry AS expiry_date,v.roadworthy_cost AS cost,NULL AS issue_date,
+            NULL AS vendor_name,NULL AS project_name,NULL AS notes,'vehicle' AS source
+            FROM vehicles v WHERE v.is_active=true AND v.roadworthy_expiry IS NOT NULL"""
+    vparams=[]
+    if vehicle_id: vsql+=" AND v.id=%s"; vparams.append(vehicle_id)
+    vehicle_level = query(vsql+" ORDER BY v.roadworthy_expiry DESC",vparams)
+    for vr in vehicle_level:
+        if vr["vehicle_id"] not in covered:
+            records.append(vr)
+    return records
 
 @app.post("/api/roadworthy",status_code=201)
-def create_roadworthy(data:RoadworthyCreate,user=Depends(require_editor)):
+def create_roadworthy(data:RoadworthyCreate,user=Depends(get_current_user)):
     row=execute("""INSERT INTO roadworthy_records (vehicle_id,vendor_id,project_id,certificate_number,issue_date,expiry_date,cost,notes)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (data.vehicle_id,data.vendor_id,data.project_id,data.certificate_number,data.issue_date,data.expiry_date,data.cost,data.notes))
-    execute("UPDATE vehicles SET roadworthy_expiry=%s,roadworthy_cost=%s WHERE id=%s",(data.expiry_date,data.cost,data.vehicle_id))
+    execute("UPDATE vehicles SET roadworthy_expiry=%s,roadworthy_cost=%s,roadworthy_number=%s WHERE id=%s",
+            (data.expiry_date,data.cost,data.certificate_number,data.vehicle_id))
     _refresh_vehicle_reminders(data.vehicle_id)
     return {"id":row["id"],"message":"Roadworthy record created"}
 
@@ -924,7 +855,7 @@ def get_reminders(status:Optional[str]=None,user=Depends(get_current_user)):
     return query(sql,params)
 
 @app.put("/api/reminders/{rid}")
-def update_reminder(rid:int,data:ReminderUpdate,user=Depends(require_editor)):
+def update_reminder(rid:int,data:ReminderUpdate,user=Depends(get_current_user)):
     if data.status=="acknowledged": execute("UPDATE reminders SET status='acknowledged',acknowledged_at=NOW() WHERE id=%s",(rid,))
     elif data.status=="resolved": execute("UPDATE reminders SET status='resolved',resolved_at=NOW() WHERE id=%s",(rid,))
     return {"message":"Updated"}
@@ -938,19 +869,19 @@ def get_vendors(category:Optional[str]=None,user=Depends(get_current_user)):
     return query(sql+" ORDER BY name",params)
 
 @app.post("/api/vendors",status_code=201)
-def create_vendor(data:VendorCreate,user=Depends(require_editor)):
+def create_vendor(data:VendorCreate,user=Depends(get_current_user)):
     row=execute("INSERT INTO vendors (name,contact_person,phone,email,address,category,notes) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
         (data.name,data.contact_person,data.phone,data.email,data.address,data.category,data.notes))
     return {"id":row["id"],"message":"Vendor created"}
 
 @app.put("/api/vendors/{vid}")
-def update_vendor(vid:int,data:VendorCreate,user=Depends(require_editor)):
+def update_vendor(vid:int,data:VendorCreate,user=Depends(get_current_user)):
     execute("UPDATE vendors SET name=%s,contact_person=%s,phone=%s,email=%s,address=%s,category=%s,notes=%s,updated_at=NOW() WHERE id=%s",
         (data.name,data.contact_person,data.phone,data.email,data.address,data.category,data.notes,vid))
     return {"message":"Updated"}
 
 @app.delete("/api/vendors/{vid}")
-def delete_vendor(vid:int,user=Depends(require_admin)):
+def delete_vendor(vid:int,user=Depends(get_current_user)):
     execute("UPDATE vendors SET is_active=false WHERE id=%s",(vid,)); return {"message":"Deactivated"}
 
 # ── Projects ──────────────────────────────────────────────────────────────────
@@ -959,13 +890,13 @@ def get_projects(user=Depends(get_current_user)):
     return query("SELECT * FROM projects ORDER BY is_active DESC,name")
 
 @app.post("/api/projects",status_code=201)
-def create_project(data:ProjectCreate,user=Depends(require_editor)):
+def create_project(data:ProjectCreate,user=Depends(get_current_user)):
     row=execute("INSERT INTO projects (code,name,description,start_date,end_date) VALUES (%s,%s,%s,%s,%s) RETURNING id",
         (data.code,data.name,data.description,data.start_date,data.end_date))
     return {"id":row["id"],"message":"Project created"}
 
 @app.put("/api/projects/{pid}")
-def update_project(pid:int,data:ProjectCreate,user=Depends(require_editor)):
+def update_project(pid:int,data:ProjectCreate,user=Depends(get_current_user)):
     execute("UPDATE projects SET code=%s,name=%s,description=%s,start_date=%s,end_date=%s WHERE id=%s",
         (data.code,data.name,data.description,data.start_date,data.end_date,pid))
     return {"message":"Updated"}
@@ -993,16 +924,9 @@ def get_audit_log(table:Optional[str]=None,action:Optional[str]=None,user_id:Opt
 
 @app.post("/api/users",status_code=201)
 def create_user(data:UserCreate,user=Depends(require_admin)):
-    if not data.password or len(data.password) < 6:
-        raise HTTPException(400, "Password must be at least 6 characters")
-    if data.role not in ("admin", "manager", "viewer"):
-        raise HTTPException(400, "Role must be admin, manager, or viewer")
-    if query_one("SELECT id FROM users WHERE username=%s", (data.username,)):
-        raise HTTPException(409, "Username already exists")
     pw=bcrypt.hashpw(data.password.encode(),bcrypt.gensalt()).decode()
     row=execute("INSERT INTO users (username,email,password_hash,first_name,last_name,role) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
         (data.username,data.email,pw,data.first_name,data.last_name,data.role))
-    audit_log("users", row["id"], "CREATE", new_values={"username": data.username, "role": data.role}, user_id=user["id"])
     return {"id":row["id"],"message":"User created"}
 
 @app.put("/api/users/{uid}/toggle")
@@ -1023,26 +947,20 @@ def change_password(uid:int,data:PasswordChange,user=Depends(require_admin)):
 from fastapi import File, UploadFile
 import base64
 
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
-
-def _validate_photo(file, contents):
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(400, "Only JPEG, PNG, WEBP or GIF images are allowed")
+@app.post("/api/vehicles/{vid}/photo")
+async def upload_vehicle_photo(vid:int, file:UploadFile=File(...), user=Depends(get_current_user)):
+    contents = await file.read()
     if len(contents) > 2_000_000:
         raise HTTPException(400, "Photo must be under 2MB")
-
-@app.post("/api/vehicles/{vid}/photo")
-async def upload_vehicle_photo(vid:int, file:UploadFile=File(...), user=Depends(require_editor)):
-    contents = await file.read()
-    _validate_photo(file, contents)
     b64 = f"data:{file.content_type};base64," + base64.b64encode(contents).decode()
     execute("UPDATE vehicles SET photo_url=%s, updated_at=NOW() WHERE id=%s", (b64, vid))
     return {"message": "Photo uploaded", "photo_url": b64}
 
 @app.post("/api/drivers/{did}/photo")
-async def upload_driver_photo(did:int, file:UploadFile=File(...), user=Depends(require_editor)):
+async def upload_driver_photo(did:int, file:UploadFile=File(...), user=Depends(get_current_user)):
     contents = await file.read()
-    _validate_photo(file, contents)
+    if len(contents) > 2_000_000:
+        raise HTTPException(400, "Photo must be under 2MB")
     b64 = f"data:{file.content_type};base64," + base64.b64encode(contents).decode()
     execute("UPDATE drivers SET photo_url=%s, updated_at=NOW() WHERE id=%s", (b64, did))
     return {"message": "Photo uploaded", "photo_url": b64}
@@ -1060,7 +978,7 @@ def get_lookups(user=Depends(get_current_user)):
         "projects": query("SELECT id,code,name FROM projects WHERE is_active=true ORDER BY name"),
         "fuel_cards": query("SELECT fc.id,fc.card_number,fc.card_type,v.unit_number FROM fuel_cards fc LEFT JOIN vehicles v ON v.id=fc.vehicle_id WHERE fc.is_active=true ORDER BY fc.card_number"),
         "drivers": query("SELECT id,employee_number,first_name,last_name FROM drivers WHERE is_active=true ORDER BY last_name"),
-        "vehicles": query("SELECT id,unit_number,registration,make,model FROM vehicles WHERE is_active=true ORDER BY unit_number"),  # photo_url intentionally excluded: base64 photos bloated this payload
+        "vehicles": query("SELECT id,unit_number,registration,make,model,photo_url FROM vehicles WHERE is_active=true ORDER BY unit_number"),
         "driver_categories": query("SELECT * FROM driver_categories ORDER BY name"),
         "service_types": query("SELECT * FROM service_types ORDER BY name"),
     }
@@ -1143,6 +1061,86 @@ def report_projects(user=Depends(get_current_user)):
         GROUP BY p.id ORDER BY fuel_cost DESC
     """)
 
+@app.get("/api/reports/insurance")
+def report_insurance(vehicle_id:Optional[int]=None,status:Optional[str]=None,user=Depends(get_current_user)):
+    sql="""SELECT ir.id,ir.policy_number,ir.start_date,ir.expiry_date,ir.cost,ir.notes,ir.vehicle_id,
+           v.unit_number,v.registration,v.make,v.model,vn.name AS vendor_name,p.name AS project_name,
+           (ir.expiry_date - CURRENT_DATE) AS days_to_expiry
+           FROM insurance_records ir JOIN vehicles v ON v.id=ir.vehicle_id
+           LEFT JOIN vendors vn ON vn.id=ir.vendor_id LEFT JOIN projects p ON p.id=ir.project_id
+           WHERE v.is_active=true"""
+    params=[]
+    if vehicle_id: sql+=" AND ir.vehicle_id=%s"; params.append(vehicle_id)
+    rows = query(sql+" ORDER BY ir.expiry_date ASC",params)
+    covered = set(r["vehicle_id"] for r in rows)
+    # Add vehicle-level insurance not covered by a dedicated record
+    vsql="""SELECT NULL AS id,v.insurance_policy AS policy_number,NULL AS start_date,
+            v.insurance_expiry AS expiry_date,v.insurance_cost AS cost,NULL AS notes,v.id AS vehicle_id,
+            v.unit_number,v.registration,v.make,v.model,vn.name AS vendor_name,NULL AS project_name,
+            (v.insurance_expiry - CURRENT_DATE) AS days_to_expiry
+            FROM vehicles v LEFT JOIN vendors vn ON vn.id=v.insurance_vendor_id
+            WHERE v.is_active=true AND v.insurance_expiry IS NOT NULL"""
+    vparams=[]
+    if vehicle_id: vsql+=" AND v.id=%s"; vparams.append(vehicle_id)
+    for vr in query(vsql,vparams):
+        if vr["vehicle_id"] not in covered: rows.append(vr)
+    rows.sort(key=lambda r:(r.get("days_to_expiry") if r.get("days_to_expiry") is not None else 99999))
+    result=[]
+    for r in rows:
+        d=r.get("days_to_expiry")
+        d=int(d) if d is not None else None
+        if d is None: st="unknown"
+        elif d<0: st="expired"
+        elif d<=30: st="expiring"
+        else: st="valid"
+        r["expiry_status"]=st
+        if status and st!=status: continue
+        result.append(r)
+    total_cost=sum(float(r.get("cost") or 0) for r in result)
+    return {"records":result,"summary":{"total_records":len(result),"total_cost":total_cost,
+            "expired":sum(1 for r in result if r["expiry_status"]=="expired"),
+            "expiring":sum(1 for r in result if r["expiry_status"]=="expiring"),
+            "valid":sum(1 for r in result if r["expiry_status"]=="valid")}}
+
+@app.get("/api/reports/roadworthy")
+def report_roadworthy(vehicle_id:Optional[int]=None,status:Optional[str]=None,user=Depends(get_current_user)):
+    sql="""SELECT rr.id,rr.certificate_number,rr.issue_date,rr.expiry_date,rr.cost,rr.notes,rr.vehicle_id,
+           v.unit_number,v.registration,v.make,v.model,vn.name AS vendor_name,p.name AS project_name,
+           (rr.expiry_date - CURRENT_DATE) AS days_to_expiry
+           FROM roadworthy_records rr JOIN vehicles v ON v.id=rr.vehicle_id
+           LEFT JOIN vendors vn ON vn.id=rr.vendor_id LEFT JOIN projects p ON p.id=rr.project_id
+           WHERE v.is_active=true"""
+    params=[]
+    if vehicle_id: sql+=" AND rr.vehicle_id=%s"; params.append(vehicle_id)
+    rows = query(sql+" ORDER BY rr.expiry_date ASC",params)
+    covered = set(r["vehicle_id"] for r in rows)
+    vsql="""SELECT NULL AS id,v.roadworthy_number AS certificate_number,NULL AS issue_date,
+            v.roadworthy_expiry AS expiry_date,v.roadworthy_cost AS cost,NULL AS notes,v.id AS vehicle_id,
+            v.unit_number,v.registration,v.make,v.model,NULL AS vendor_name,NULL AS project_name,
+            (v.roadworthy_expiry - CURRENT_DATE) AS days_to_expiry
+            FROM vehicles v WHERE v.is_active=true AND v.roadworthy_expiry IS NOT NULL"""
+    vparams=[]
+    if vehicle_id: vsql+=" AND v.id=%s"; vparams.append(vehicle_id)
+    for vr in query(vsql,vparams):
+        if vr["vehicle_id"] not in covered: rows.append(vr)
+    rows.sort(key=lambda r:(r.get("days_to_expiry") if r.get("days_to_expiry") is not None else 99999))
+    result=[]
+    for r in rows:
+        d=r.get("days_to_expiry")
+        d=int(d) if d is not None else None
+        if d is None: st="unknown"
+        elif d<0: st="expired"
+        elif d<=30: st="expiring"
+        else: st="valid"
+        r["expiry_status"]=st
+        if status and st!=status: continue
+        result.append(r)
+    total_cost=sum(float(r.get("cost") or 0) for r in result)
+    return {"records":result,"summary":{"total_records":len(result),"total_cost":total_cost,
+            "expired":sum(1 for r in result if r["expiry_status"]=="expired"),
+            "expiring":sum(1 for r in result if r["expiry_status"]=="expiring"),
+            "valid":sum(1 for r in result if r["expiry_status"]=="valid")}}
+
 # ── Settings ──────────────────────────────────────────────────────────────────
 @app.get("/api/settings")
 def get_settings(user=Depends(get_current_user)):
@@ -1152,14 +1150,8 @@ def get_settings(user=Depends(get_current_user)):
 class SettingUpdate(BaseModel): value: str
 
 @app.put("/api/settings/{key}")
-def update_setting(key: str, data: SettingUpdate, user=Depends(require_admin)):
-    # rowcount check: previously returned "Updated" even for non-existent keys
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE reminder_settings SET setting_value=%s, updated_at=NOW() WHERE setting_key=%s", (data.value, key))
-            if cur.rowcount == 0:
-                raise HTTPException(404, f"Unknown setting: {key}")
-            conn.commit()
+def update_setting(key: str, data: SettingUpdate, user=Depends(get_current_user)):
+    execute("UPDATE reminder_settings SET setting_value=%s, updated_at=NOW() WHERE setting_key=%s", (data.value, key))
     return {"message": "Updated"}
 
 
@@ -1172,12 +1164,12 @@ def get_driver_categories(user=Depends(get_current_user)):
     return query("SELECT * FROM driver_categories ORDER BY name")
 
 @app.post("/api/driver-categories", status_code=201)
-def create_driver_category(data: LookupCreate, user=Depends(require_admin)):
+def create_driver_category(data: LookupCreate, user=Depends(get_current_user)):
     row = execute("INSERT INTO driver_categories (name) VALUES (%s) RETURNING id", (data.name,))
     return {"id": row["id"], "message": "Created"}
 
 @app.delete("/api/driver-categories/{cid}")
-def delete_driver_category(cid: int, user=Depends(require_admin)):
+def delete_driver_category(cid: int, user=Depends(get_current_user)):
     execute("DELETE FROM driver_categories WHERE id=%s", (cid,))
     return {"message": "Deleted"}
 
@@ -1186,12 +1178,12 @@ def get_service_types(user=Depends(get_current_user)):
     return query("SELECT * FROM service_types ORDER BY name")
 
 @app.post("/api/service-types", status_code=201)
-def create_service_type(data: LookupCreate, user=Depends(require_admin)):
+def create_service_type(data: LookupCreate, user=Depends(get_current_user)):
     row = execute("INSERT INTO service_types (name) VALUES (%s) RETURNING id", (data.name,))
     return {"id": row["id"], "message": "Created"}
 
 @app.delete("/api/service-types/{sid}")
-def delete_service_type(sid: int, user=Depends(require_admin)):
+def delete_service_type(sid: int, user=Depends(get_current_user)):
     execute("DELETE FROM service_types WHERE id=%s", (sid,))
     return {"message": "Deleted"}
 
@@ -1205,7 +1197,7 @@ class CardThreshold(BaseModel):
     balance_threshold: float
 
 @app.post("/api/fuel-cards/{cid}/topup")
-def topup_card(cid: int, data: CardTopup, user=Depends(require_editor)):
+def topup_card(cid: int, data: CardTopup, user=Depends(get_current_user)):
     dt = data.topup_date or datetime.now().isoformat()
     with transaction() as cur:
         cur.execute("UPDATE fuel_cards SET current_balance = current_balance + %s, updated_at=NOW() WHERE id=%s",
@@ -1220,7 +1212,7 @@ def topup_card(cid: int, data: CardTopup, user=Depends(require_editor)):
     return {"message": "Card topped up"}
 
 @app.put("/api/fuel-cards/{cid}/threshold")
-def set_threshold(cid: int, data: CardThreshold, user=Depends(require_editor)):
+def set_threshold(cid: int, data: CardThreshold, user=Depends(get_current_user)):
     execute("UPDATE fuel_cards SET balance_threshold=%s WHERE id=%s", (data.balance_threshold, cid))
     return {"message": "Threshold updated"}
 
@@ -1263,8 +1255,7 @@ def card_statement(cid: int, user=Depends(get_current_user)):
                     ORDER BY ft.transaction_date, ft.id""", (cid, cid, cid, cid))
     topups = sum(float(t["total_cost"] or 0) for t in txns if t["transaction_type"] == "topup")
     expenses = sum(float(t["total_cost"] or 0) for t in txns if t["transaction_type"] == "purchase")
-    adjustments = sum(float(t["total_cost"] or 0) for t in txns if t["transaction_type"] == "adjustment")
-    return {"card": card, "transactions": txns, "summary": {"topups": topups, "expenses": expenses, "adjustments": adjustments, "balance": float(card.get("current_balance") or 0), "initial_balance": float(card.get("initial_balance") or 0)}}
+    return {"card": card, "transactions": txns, "summary": {"topups": topups, "expenses": expenses, "balance": float(card.get("current_balance") or 0), "initial_balance": float(card.get("initial_balance") or 0)}}
 
 @app.get("/api/reports/fuel-cards")
 def report_fuel_cards(date_from:Optional[str]=None,date_to:Optional[str]=None,user=Depends(get_current_user)):
@@ -1286,40 +1277,37 @@ def report_fuel_cards(date_from:Optional[str]=None,date_to:Optional[str]=None,us
         upto_filter=" AND transaction_date<=%s"
         upto_params_per_card.append(_norm_date_to(date_to))
     
-    # Build the param list: 5 period subqueries + 5 upto subqueries per card row
-    # Order in SQL: total_topups, total_expenses, total_transfers_out, total_transfers_in, total_adjustments,
-    #               cum_topups, cum_purchases, cum_transfers_out, cum_transfers_in, cum_adjustments
-    all_params = (period_params_per_card * 5) + (upto_params_per_card * 5)
+    # Build the param list: 4 period subqueries + 4 upto subqueries per card row
+    # Order in SQL: total_topups, total_expenses, total_transfers_out, total_transfers_in,
+    #               cum_topups, cum_purchases, cum_transfers_out, cum_transfers_in
+    all_params = (period_params_per_card * 4) + (upto_params_per_card * 4)
     
     cards = query("""SELECT fc.*, v.unit_number, v.registration, v.make, v.model,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='topup'"""+period_filter+"""),0) AS total_topups,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'"""+period_filter+"""),0) AS total_expenses,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='transfer'"""+period_filter+"""),0) AS total_transfers_out,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE transfer_to_card_id=fc.id AND transaction_type='transfer'"""+period_filter+"""),0) AS total_transfers_in,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='adjustment'"""+period_filter+"""),0) AS total_adjustments,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='topup'"""+upto_filter+"""),0) AS cum_topups,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase'"""+upto_filter+"""),0) AS cum_purchases,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='transfer'"""+upto_filter+"""),0) AS cum_transfers_out,
                      COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE transfer_to_card_id=fc.id AND transaction_type='transfer'"""+upto_filter+"""),0) AS cum_transfers_in,
-                     COALESCE((SELECT SUM(total_cost) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='adjustment'"""+upto_filter+"""),0) AS cum_adjustments,
                      (SELECT MAX(transaction_date) FROM fuel_transactions WHERE fuel_card_id=fc.id AND transaction_type='purchase') AS last_used
                      FROM fuel_cards fc LEFT JOIN vehicles v ON v.id=fc.vehicle_id
                      WHERE fc.is_active=true ORDER BY fc.card_number""", all_params)
     
     # Compute period-end balance for each card
-    # = initial_balance + cum topups - cum purchases - cum transfers out + cum transfers in + cum adjustments (signed)
+    # = initial_balance + cumulative topups - cumulative purchases - cumulative transfers out + cumulative transfers in
     for c in cards:
         initial = float(c.get("initial_balance") or 0)
         cum_top = float(c.get("cum_topups") or 0)
         cum_pur = float(c.get("cum_purchases") or 0)
         cum_tout = float(c.get("cum_transfers_out") or 0)
         cum_tin = float(c.get("cum_transfers_in") or 0)
-        cum_adj = float(c.get("cum_adjustments") or 0)
         # If no date_to filter, period-end balance = current live balance (most accurate)
         if not date_to:
             c["period_end_balance"] = float(c.get("current_balance") or 0)
         else:
-            c["period_end_balance"] = initial + cum_top - cum_pur - cum_tout + cum_tin + cum_adj
+            c["period_end_balance"] = initial + cum_top - cum_pur - cum_tout + cum_tin
     
     # Period summary uses period_end_balance for total_balance
     total_balance = sum(float(c.get("period_end_balance") or 0) for c in cards)
