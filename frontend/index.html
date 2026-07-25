@@ -746,7 +746,7 @@ async function loadRpt(type,btn){
     h+='</div>';
     // Table
     h+='<table style="width:100%;border:2px solid var(--tx);border-collapse:collapse"><thead><tr>';
-    ['Vehicle',docCol,'Insurer/Center',startCol,'Expiry','Days Left','Cost (GH\u20B5)','Status'].forEach(function(c){h+='<th style="border:1px solid var(--bd);background:var(--sf3);color:var(--tx);text-transform:none;padding:9px 10px;font-size:.8rem;'+(c.indexOf('Cost')>=0||c==='Days Left'?'text-align:right':'')+'">'+c+'</th>';});
+    ['Vehicle','Make / Model / Year',docCol,'Insurer/Center',startCol,'Expiry','Days Left','Cost (GH\u20B5)','Status'].forEach(function(c){h+='<th style="border:1px solid var(--bd);background:var(--sf3);color:var(--tx);text-transform:none;padding:9px 10px;font-size:.8rem;'+(c.indexOf('Cost')>=0||c==='Days Left'?'text-align:right':'')+'">'+c+'</th>';});
     h+='</tr></thead><tbody>';
     if(recs.length){recs.forEach(function(r){
       var veh=r.registration?esc(r.registration)+' / '+esc(r.unit_number||''):esc(r.unit_number||'\u2014');
@@ -754,7 +754,9 @@ async function loadRpt(type,btn){
       var stLabel=st==='expired'?'EXPIRED':st==='expiring'?'EXPIRING':st==='valid'?'Valid':'\u2014';
       var stColor=st==='expired'?'var(--dn)':st==='expiring'?'var(--wn)':st==='valid'?'var(--ac)':'var(--tx3)';
       var days=r.days_to_expiry;var daysDisp=days==null?'\u2014':days<0?Math.abs(days)+'d ago':days+'d';
+      var mmy=[r.make,r.model,r.year].filter(function(x){return x;}).join(' ');
       h+='<tr><td style="border:1px solid var(--bd);padding:7px 10px" class="cm">'+veh+'</td>';
+      h+='<td style="border:1px solid var(--bd);padding:7px 10px">'+esc(mmy||'\u2014')+'</td>';
       h+='<td style="border:1px solid var(--bd);padding:7px 10px">'+esc((isIns?r.policy_number:r.certificate_number)||'\u2014')+'</td>';
       h+='<td style="border:1px solid var(--bd);padding:7px 10px">'+esc(r.vendor_name||'\u2014')+'</td>';
       h+='<td style="border:1px solid var(--bd);padding:7px 10px">'+fmtD(isIns?r.start_date:r.issue_date)+'</td>';
@@ -763,8 +765,8 @@ async function loadRpt(type,btn){
       h+='<td style="border:1px solid var(--bd);padding:7px 10px;text-align:right;font-family:var(--mono)">'+fmt(r.cost)+'</td>';
       h+='<td style="border:1px solid var(--bd);padding:7px 10px;font-weight:600;color:'+stColor+'">'+stLabel+'</td></tr>';
     });
-    h+='<tr style="background:var(--sf2)"><td colspan="6" style="border:2px solid var(--tx);padding:9px 10px;text-align:right;font-weight:700">TOTAL COST</td><td style="border:2px solid var(--tx);padding:9px 10px;text-align:right;font-family:var(--mono);font-weight:700">'+fmt(sm.total_cost)+'</td><td style="border:2px solid var(--tx)"></td></tr>';
-    }else{h+='<tr><td colspan="8"><div class="empty-state" style="padding:24px"><p>No '+type+' records found</p></div></td></tr>';}
+    h+='<tr style="background:var(--sf2)"><td colspan="7" style="border:2px solid var(--tx);padding:9px 10px;text-align:right;font-weight:700">TOTAL COST</td><td style="border:2px solid var(--tx);padding:9px 10px;text-align:right;font-family:var(--mono);font-weight:700">'+fmt(sm.total_cost)+'</td><td style="border:2px solid var(--tx)"></td></tr>';
+    }else{h+='<tr><td colspan="9"><div class="empty-state" style="padding:24px"><p>No '+type+' records found</p></div></td></tr>';}
     h+='</tbody></table></div>';el.innerHTML=h;
   }
 }
