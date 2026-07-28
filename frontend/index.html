@@ -648,10 +648,13 @@ async function loadRpt(type,btn){
     flt.innerHTML='<div class="toolbar" style="margin-bottom:0"><span style="font-size:.82rem;color:var(--tx2);font-weight:500">Filter:</span><input type="date" id="rpt-fuel-from" value="'+savedFF+'" onchange="loadRpt(\'fuel\')"><span style="color:var(--tx3);font-size:.82rem">to</span><input type="date" id="rpt-fuel-to" value="'+savedFT+'" onchange="loadRpt(\'fuel\')"><select id="rpt-fuel-veh" onchange="loadRpt(\'fuel\')"><option value="">All Vehicles</option>'+vh2+'</select><select id="rpt-fuel-proj" onchange="loadRpt(\'fuel\')"><option value="">All Projects</option>'+ph2+'</select><button class="btn btn-s btn-sm" onclick="document.getElementById(\'rpt-fuel-from\').value=\'\';document.getElementById(\'rpt-fuel-to\').value=\'\';document.getElementById(\'rpt-fuel-veh\').value=\'\';document.getElementById(\'rpt-fuel-proj\').value=\'\';loadRpt(\'fuel\')">Clear</button></div>';
   }
   if(type==='fuel-cards'){
-    var cparts=[];
-    if(savedCF)cparts.push('date_from='+savedCF);
-    if(savedCT)cparts.push('date_to='+savedCT);
-    if(cparts.length)qp='?'+cparts.join('&');
+    // Default to current month if no filter set yet, so data ALWAYS matches the displayed period
+    if(!savedCF||!savedCT){
+      var _now=new Date();
+      if(!savedCF)savedCF=new Date(_now.getFullYear(),_now.getMonth(),1).toISOString().slice(0,10);
+      if(!savedCT)savedCT=_now.toISOString().slice(0,10);
+    }
+    qp='?date_from='+savedCF+'&date_to='+savedCT;
   }
   if(type==='insurance'||type==='roadworthy'){
     var covVeh=document.getElementById('cov-veh');var savedCovV=covVeh?covVeh.value:'';
